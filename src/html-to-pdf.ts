@@ -5,10 +5,39 @@
  * via jsPDF's doc.html() renderer.
  */
 
-/**
- * Default page layout (A4, millimetres).
- */
-const DEFAULT_OPTIONS = {
+import type { jsPDF } from "jspdf";
+
+export interface Margin {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export interface PageOptions {
+  unit: string;
+  format: string;
+  pageWidth: number;
+  pageHeight: number;
+  margin: Margin;
+}
+
+export interface Layout {
+  renderedWidth: number;
+  scale: number;
+  contentWidthMm: number;
+  pageContentPx: number;
+}
+
+export interface PrepareResult {
+  clone: HTMLElement;
+  layout: Layout;
+  options: PageOptions;
+  cleanup: () => void;
+}
+
+/** Default page layout (A4, millimetres). */
+const DEFAULT_OPTIONS: PageOptions = {
   unit: "mm",
   format: "a4",
   pageWidth: 210,
@@ -16,14 +45,8 @@ const DEFAULT_OPTIONS = {
   margin: { top: 20, right: 20, bottom: 20, left: 20 },
 };
 
-/**
- * Compute derived layout values from options.
- *
- * @param {HTMLElement} container - The positioned container to measure.
- * @param {object}      opts     - Merged options (DEFAULT_OPTIONS + user).
- * @returns {{ renderedWidth: number, scale: number, contentWidthMm: number, pageContentPx: number }}
- */
-function computeLayout(container, opts) {
+/** Compute derived layout values from options. */
+function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
   const renderedWidth = container.offsetWidth;
   const contentWidthMm =
     opts.pageWidth - opts.margin.left - opts.margin.right;
@@ -36,12 +59,9 @@ function computeLayout(container, opts) {
 
 /**
  * Clone an element and position it off-screen at print width for measurement.
- *
- * @param {HTMLElement} source - The element to clone.
- * @returns {HTMLElement} The positioned clone (appended to document.body).
  */
-function createPrintClone(source) {
-  const clone = source.cloneNode(true);
+function createPrintClone(source: HTMLElement): HTMLElement {
+  const clone = source.cloneNode(true) as HTMLElement;
   Object.assign(clone.style, {
     position: "fixed",
     top: "0",
@@ -58,16 +78,14 @@ function createPrintClone(source) {
 /**
  * Convert HTML table attributes (cellpadding, cellspacing, border) to
  * inline CSS so doc.html()'s renderer picks them up.
- *
- * @param {HTMLElement} container - The print container.
  */
-function normalizeTableAttributes(container) {
+function normalizeTableAttributes(container: HTMLElement): void {
   for (const table of container.querySelectorAll("table")) {
     const cellpadding = table.getAttribute("cellpadding");
     if (cellpadding) {
       for (const cell of table.querySelectorAll("th, td")) {
-        if (!cell.style.padding) {
-          cell.style.padding = cellpadding + "px";
+        if (!(cell as HTMLElement).style.padding) {
+          (cell as HTMLElement).style.padding = cellpadding + "px";
         }
       }
       table.removeAttribute("cellpadding");
@@ -80,13 +98,13 @@ function normalizeTableAttributes(container) {
  * repeating the header row in each chunk.
  *
  * Only operates on direct-child tables of `container`.
- *
- * @param {HTMLElement} container     - The print container.
- * @param {number}      pageContentPx - Usable page height in CSS pixels.
  */
-function splitOversizedTables(container, pageContentPx) {
+function splitOversizedTables(
+  container: HTMLElement,
+  pageContentPx: number,
+): void {
   for (const table of Array.from(
-    container.querySelectorAll(":scope > table")
+    container.querySelectorAll<HTMLTableElement>(":scope > table"),
   )) {
     if (table.offsetHeight <= pageContentPx) continue;
 
@@ -99,8 +117,8 @@ function splitOversizedTables(container, pageContentPx) {
     const headerHeight = headerRow ? headerRow.offsetHeight : 0;
     const maxRowsHeight = pageContentPx - headerHeight - 2;
 
-    const groups = [];
-    let group = [];
+    const groups: HTMLTableRowElement[][] = [];
+    let group: HTMLTableRowElement[] = [];
     let groupHeight = 0;
 
     for (const row of bodyRows) {
@@ -116,10 +134,10 @@ function splitOversizedTables(container, pageContentPx) {
     if (group.length > 0) groups.push(group);
 
     for (const g of groups) {
-      const t = table.cloneNode(false);
+      const t = table.cloneNode(false) as HTMLTableElement;
       if (headerRow) t.appendChild(headerRow.cloneNode(true));
       for (const row of g) t.appendChild(row.cloneNode(true));
-      table.parentNode.insertBefore(t, table);
+      table.parentNode!.insertBefore(t, table);
     }
     table.remove();
   }
@@ -128,18 +146,20 @@ function splitOversizedTables(container, pageContentPx) {
 /**
  * Split direct-child elements (non-table) that are taller than one page
  * into word-boundary chunks using binary search.
- *
- * @param {HTMLElement} container     - The print container.
- * @param {number}      pageContentPx - Usable page height in CSS pixels.
  */
-function splitOversizedText(container, pageContentPx) {
+function splitOversizedText(
+  container: HTMLElement,
+  pageContentPx: number,
+): void {
   for (const el of Array.from(container.querySelectorAll(":scope > *"))) {
-    if (el.offsetHeight <= pageContentPx || el.tagName === "TABLE") continue;
+    const htmlEl = el as HTMLElement;
+    if (htmlEl.offsetHeight <= pageContentPx || htmlEl.tagName === "TABLE")
+      continue;
 
-    const tag = el.tagName;
-    const styleAttr = el.getAttribute("style") || "";
-    const width = getComputedStyle(el).width;
-    const words = el.textContent.split(/\s+/).filter(Boolean);
+    const tag = htmlEl.tagName;
+    const styleAttr = htmlEl.getAttribute("style") || "";
+    const width = getComputedStyle(htmlEl).width;
+    const words = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
 
     const measure = document.createElement(tag);
     measure.setAttribute("style", styleAttr);
@@ -150,7 +170,7 @@ function splitOversizedText(container, pageContentPx) {
     });
     container.appendChild(measure);
 
-    const chunks = [];
+    const chunks: HTMLElement[] = [];
     let start = 0;
 
     while (start < words.length) {
@@ -177,20 +197,18 @@ function splitOversizedText(container, pageContentPx) {
     measure.remove();
 
     for (const chunk of chunks) {
-      el.parentNode.insertBefore(chunk, el);
+      htmlEl.parentNode!.insertBefore(chunk, htmlEl);
     }
-    el.remove();
+    htmlEl.remove();
   }
 }
 
-/**
- * Insert spacer divs so that no direct child straddles a page boundary.
- *
- * @param {HTMLElement} container     - The print container.
- * @param {number}      pageContentPx - Usable page height in CSS pixels.
- */
-function insertPageBreakSpacers(container, pageContentPx) {
-  const children = Array.from(container.children);
+/** Insert spacer divs so that no direct child straddles a page boundary. */
+function insertPageBreakSpacers(
+  container: HTMLElement,
+  pageContentPx: number,
+): void {
+  const children = Array.from(container.children) as HTMLElement[];
   for (const child of children) {
     const childTop = child.offsetTop;
     const childBottom = childTop + child.offsetHeight;
@@ -200,7 +218,7 @@ function insertPageBreakSpacers(container, pageContentPx) {
     if (childBottom > pageEnd && child.offsetHeight <= pageContentPx) {
       const spacer = document.createElement("div");
       spacer.style.height = pageEnd - childTop + 1 + "px";
-      child.parentNode.insertBefore(spacer, child);
+      child.parentNode!.insertBefore(spacer, child);
     }
   }
 }
@@ -210,13 +228,12 @@ function insertPageBreakSpacers(container, pageContentPx) {
  *
  * Clones the element, splits oversized tables/text, and inserts page-break
  * spacers. Returns the ready-to-render clone and layout metadata.
- *
- * @param {HTMLElement} source  - The source element to prepare.
- * @param {object}      [opts] - Override any key from DEFAULT_OPTIONS.
- * @returns {{ clone: HTMLElement, layout: object, cleanup: () => void }}
  */
-function prepare(source, opts = {}) {
-  const merged = {
+function prepare(
+  source: HTMLElement,
+  opts: Partial<PageOptions> = {},
+): PrepareResult {
+  const merged: PageOptions = {
     ...DEFAULT_OPTIONS,
     ...opts,
     margin: { ...DEFAULT_OPTIONS.margin, ...opts.margin },
@@ -240,17 +257,16 @@ function prepare(source, opts = {}) {
 
 /**
  * Render an HTML element to PDF using doc.html().
- *
- * @param {jsPDF}       doc     - An existing jsPDF instance.
- * @param {HTMLElement}  source - The HTML element to render.
- * @param {object}       [opts] - Override any key from DEFAULT_OPTIONS.
- * @returns {Promise<jsPDF>} Resolves with the jsPDF instance once rendering is done.
  */
-async function renderHTML(doc, source, opts = {}) {
+async function renderHTML(
+  doc: jsPDF,
+  source: HTMLElement,
+  opts: Partial<PageOptions> = {},
+): Promise<jsPDF> {
   const { clone, layout, options, cleanup } = prepare(source, opts);
 
   try {
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       doc.html(clone, {
         callback: () => resolve(),
         width: layout.contentWidthMm,
