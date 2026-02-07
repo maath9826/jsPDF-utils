@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>js-pdf-utils</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 720px;
+        margin: 2rem auto;
+        line-height: 1.6;
+      }
+
+      button {
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+
+      pre {
+        background: #f5f5f5;
+        padding: 1rem;
+        overflow-x: auto;
+      }
+
+      /* Prevent doc.html() from slicing through table rows at page breaks */
+      #print-section table {
+        break-inside: avoid;
+      }
+
+      #print-section tr {
+        break-inside: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>doc.html() Renderer Test</h1>
+    <p>
+      Click the button below to render the HTML element below directly to PDF
+      using <code>doc.html()</code> with Arabic text reshaping.
+    </p>
+    <button id="generate-html">Generate PDF (doc.html)</button>
+    <div
+      id="print-section"
+      dir="rtl"
+      lang="ar"
+      style="text-align: right; direction: rtl; font-family: Arial, sans-serif"
+    >
+      <h2 style="margin: 0">نموذج مستند عربي</h2>
+      <p style="margin: 0">
+        العام الدراسي <strong>2019-2020</strong> كان مميزاً
+      </p>
+      <p style="margin: 0">من 2019-2020 إلى 2023-2024 شهدنا تطوراً كبيراً</p>
+      <p style="margin: 0">اتصل على الرقم +964-770-123-4567 أو 0771-234-5678</p>
+      <p style="margin: 0">
+        جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام الدراسي 2019-2020
+        تضم الجامعة عدداً من الكليات
+      </p>
+      <table
+        border="1"
+        cellpadding="6"
+        cellspacing="0"
+        style="border-collapse: collapse; width: 100%; text-align: right"
+      >
+        <tr style="background: #f0f0f0">
+          <th>الاسم</th>
+          <th>التاريخ</th>
+          <th>الدرجة</th>
+        </tr>
+        <tr>
+          <td>أحمد محمد</td>
+          <td>15/05/1990</td>
+          <td>95</td>
+        </tr>
+        <tr>
+          <td>فاطمة علي</td>
+          <td>20/06/2015</td>
+          <td>88</td>
+        </tr>
+      </table>
+    </div>
+
+    <hr />
+
+    <script type="module">
+      import jsPDF from "jspdf";
+      import { renderHTML } from "./src/html-to-pdf.js";
+
+      const htmlButton = document.getElementById("generate-html");
+
+      htmlButton.addEventListener("click", async () => {
+        const target = document.getElementById("print-section");
+        if (!target) return;
+
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+        doc.addFont("../fonts/arial.ttf", "arial", "normal", "normal");
+        doc.addFont("../fonts/arial-bold.ttf", "arial", "normal", "bold");
+
+        await renderHTML(doc, target);
+
+        doc.save("doc-html-renderer-test.pdf");
+      });
+    </script>
+  </body>
+</html>
