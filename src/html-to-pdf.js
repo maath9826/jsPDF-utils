@@ -56,6 +56,26 @@ function createPrintClone(source) {
 }
 
 /**
+ * Convert HTML table attributes (cellpadding, cellspacing, border) to
+ * inline CSS so doc.html()'s renderer picks them up.
+ *
+ * @param {HTMLElement} container - The print container.
+ */
+function normalizeTableAttributes(container) {
+  for (const table of container.querySelectorAll("table")) {
+    const cellpadding = table.getAttribute("cellpadding");
+    if (cellpadding) {
+      for (const cell of table.querySelectorAll("th, td")) {
+        if (!cell.style.padding) {
+          cell.style.padding = cellpadding + "px";
+        }
+      }
+      table.removeAttribute("cellpadding");
+    }
+  }
+}
+
+/**
  * Split tables that exceed one page height into smaller sub-tables,
  * repeating the header row in each chunk.
  *
@@ -203,6 +223,7 @@ function prepare(source, opts = {}) {
   };
 
   const clone = createPrintClone(source);
+  normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
   splitOversizedTables(clone, layout.pageContentPx);
@@ -253,6 +274,7 @@ export {
   DEFAULT_OPTIONS,
   computeLayout,
   createPrintClone,
+  normalizeTableAttributes,
   splitOversizedTables,
   splitOversizedText,
   insertPageBreakSpacers,

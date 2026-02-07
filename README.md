@@ -11,20 +11,20 @@ npm install jspdf-utils jspdf html2canvas
 ## Usage
 
 ```javascript
-import jsPDF from 'jspdf';
-import { renderHTML } from 'jspdf-utils';
+import jsPDF from "jspdf";
+import { renderHTML } from "jspdf-utils";
 
-const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+const doc = new jsPDF({ unit: "mm", format: "a4" });
 
 // Add fonts if needed for Arabic/RTL text
-doc.addFont('path/to/arial.ttf', 'arial', 'normal', 'normal');
-doc.addFont('path/to/arial-bold.ttf', 'arial', 'normal', 'bold');
+doc.addFont("path/to/arial.ttf", "arial", "normal", "normal");
+doc.addFont("path/to/arial-bold.ttf", "arial", "normal", "bold");
 
 // Render HTML element to PDF
-const element = document.getElementById('content');
+const element = document.getElementById("content");
 await renderHTML(doc, element);
 
-doc.save('output.pdf');
+doc.save("output.pdf");
 ```
 
 ## Features
