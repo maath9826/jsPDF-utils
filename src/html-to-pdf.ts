@@ -6,6 +6,7 @@
  */
 
 import type { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 
 export interface Margin {
   top: number;
@@ -48,8 +49,7 @@ const DEFAULT_OPTIONS: PageOptions = {
 /** Compute derived layout values from options. */
 function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
   const renderedWidth = container.offsetWidth;
-  const contentWidthMm =
-    opts.pageWidth - opts.margin.left - opts.margin.right;
+  const contentWidthMm = opts.pageWidth - opts.margin.left - opts.margin.right;
   const scale = contentWidthMm / renderedWidth;
   const usableHeightMm = opts.pageHeight - opts.margin.top - opts.margin.bottom;
   const pageContentPx = usableHeightMm / scale;
@@ -212,8 +212,7 @@ function insertPageBreakSpacers(
   for (const child of children) {
     const childTop = child.offsetTop;
     const childBottom = childTop + child.offsetHeight;
-    const pageEnd =
-      (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
+    const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
     if (childBottom > pageEnd && child.offsetHeight <= pageContentPx) {
       const spacer = document.createElement("div");
@@ -286,6 +285,119 @@ async function renderHTML(
   return doc;
 }
 
+export interface ImagePDFOptions {
+  imageFormat?: "JPEG" | "PNG";
+  imageQuality?: number;
+  scale?: number;
+}
+
+/**
+ * Render an HTML element as an image-based PDF. Each page is a rasterized
+ * screenshot — no selectable or extractable text in the output.
+ */
+async function renderImagePDF(
+  source: HTMLElement,
+  opts: Partial<PageOptions> & ImagePDFOptions = {},
+): Promise<jsPDF> {
+  const { imageFormat = "JPEG", imageQuality = 1, scale = 2 } = opts;
+
+  const merged: PageOptions = {
+    ...DEFAULT_OPTIONS,
+    ...opts,
+    margin: { ...DEFAULT_OPTIONS.margin, ...opts.margin },
+  };
+
+  const clone = createPrintClone(source);
+  clone.style.opacity = "1";
+  normalizeTableAttributes(clone);
+  const layout = computeLayout(clone, merged);
+
+  splitOversizedTables(clone, layout.pageContentPx);
+  splitOversizedText(clone, layout.pageContentPx);
+  insertPageBreakSpacers(clone, layout.pageContentPx);
+
+  try {
+    const canvas = await html2canvas(clone, {
+      scale,
+      backgroundColor: "#ffffff",
+    });
+
+    const { jsPDF: JsPDF } = await import("jspdf");
+
+    const contentWidthMm =
+      merged.pageWidth - merged.margin.left - merged.margin.right;
+    const contentHeightMm =
+      merged.pageHeight - merged.margin.top - merged.margin.bottom;
+
+    const contentWidthPx = canvas.width;
+    const contentHeightPx = (contentHeightMm / contentWidthMm) * contentWidthPx;
+
+    const totalPages = Math.ceil(canvas.height / contentHeightPx);
+    const orientation = merged.pageWidth > merged.pageHeight ? "l" : "p";
+
+    const imagePDF = new JsPDF({
+      orientation,
+      unit: "mm",
+      format: [merged.pageWidth, merged.pageHeight],
+    });
+
+    for (let i = 0; i < totalPages; i++) {
+      const sliceHeight = Math.min(
+        contentHeightPx,
+        canvas.height - i * contentHeightPx,
+      );
+
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = contentWidthPx;
+      pageCanvas.height = sliceHeight;
+
+      const ctx = pageCanvas.getContext("2d");
+      if (!ctx) throw new Error("Could not get canvas context");
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, contentWidthPx, sliceHeight);
+
+      ctx.drawImage(
+        canvas,
+        0,
+        i * contentHeightPx,
+        contentWidthPx,
+        sliceHeight,
+        0,
+        0,
+        contentWidthPx,
+        sliceHeight,
+      );
+
+      const imageData = pageCanvas.toDataURL(
+        `image/${imageFormat.toLowerCase()}`,
+        imageQuality,
+      );
+
+      if (i > 0) {
+        imagePDF.addPage([merged.pageWidth, merged.pageHeight], orientation);
+      }
+
+      const sliceHeightMm = (sliceHeight / contentWidthPx) * contentWidthMm;
+
+      imagePDF.addImage(
+        imageData,
+        imageFormat,
+        merged.margin.left,
+        merged.margin.top,
+        contentWidthMm,
+        sliceHeightMm,
+        undefined,
+        "FAST",
+      );
+    }
+
+    return imagePDF;
+  } finally {
+    clone.remove();
+  }
+}
+
 export {
   DEFAULT_OPTIONS,
   computeLayout,
@@ -296,4 +408,5 @@ export {
   insertPageBreakSpacers,
   prepare,
   renderHTML,
+  renderImagePDF,
 };

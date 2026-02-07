@@ -66,8 +66,7 @@
     </div>
 
     <script type="module">
-      import jsPDF from "jspdf";
-      import { renderHTML } from "./src/html-to-pdf.js";
+      import { renderImagePDF } from "./src/html-to-pdf.js";
 
       const htmlButton = document.getElementById("generate-html");
 
@@ -75,14 +74,8 @@
         const target = document.getElementById("print-section");
         if (!target) return;
 
-        const doc = new jsPDF({ unit: "mm", format: "a4" });
-
-        doc.addFont("./fonts/arial.ttf", "arial", "normal", "normal");
-        doc.addFont("./fonts/arial-bold.ttf", "arial", "normal", "bold");
-
-        await renderHTML(doc, target);
-
-        doc.save("doc-html-renderer-test.pdf");
+        const imagePDF = await renderImagePDF(target);
+        imagePDF.save("doc-html-renderer-test.pdf");
       });
     </script>
   </body>

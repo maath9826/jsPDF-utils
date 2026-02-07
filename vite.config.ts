@@ -8,7 +8,7 @@ export default defineConfig({
       fileName: "html-to-pdf",
     },
     rollupOptions: {
-      external: ["jspdf"],
+      external: ["jspdf", "html2canvas"],
     },
   },
 });
