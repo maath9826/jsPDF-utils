@@ -113,85 +113,66 @@ function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
 }
 
 /**
- * Clone an element and position it off-screen at print width for measurement.
+ * Clone an element into a hidden iframe so that the page's CSS frameworks
+ * (Tailwind, Bootstrap, etc.) cannot interfere with PDF rendering.
+ *
+ * Only @font-face rules are copied into the iframe so custom fonts still work.
+ * The returned element's `.remove()` method cleans up the iframe automatically.
  */
 function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
-  const clone = source.cloneNode(true) as HTMLElement;
-  Object.assign(clone.style, {
+  const iframe = document.createElement("iframe");
+  Object.assign(iframe.style, {
     position: "fixed",
     top: "0",
-    left: "0",
-    boxSizing: "border-box",
+    left: "-99999px",
     width: pageWidth + "mm",
+    height: "99999px",
+    border: "none",
     opacity: "0.000001",
     pointerEvents: "none",
   });
-  document.body.appendChild(clone);
-  return clone;
-}
+  document.body.appendChild(iframe);
 
-/**
- * Inline computed styles from `source` onto the matching elements in `clone`.
- *
- * jsPDF's doc.html() has its own CSS engine that can misinterpret styles
- * injected by frameworks like Tailwind. By "baking" the browser's computed
- * values as inline styles on the clone, we bypass jsPDF's CSS processing
- * entirely and get consistent output across all environments.
- */
-function inlineComputedStyles(source: HTMLElement, clone: HTMLElement): void {
-  const PROPS = [
-    "display",
-    "vertical-align",
-    "text-align",
-    "line-height",
-    "box-sizing",
-    "padding-top",
-    "padding-right",
-    "padding-bottom",
-    "padding-left",
-    "border-top-width",
-    "border-right-width",
-    "border-bottom-width",
-    "border-left-width",
-    "border-top-style",
-    "border-right-style",
-    "border-bottom-style",
-    "border-left-style",
-    "border-top-color",
-    "border-right-color",
-    "border-bottom-color",
-    "border-left-color",
-    "border-collapse",
-    "border-spacing",
-    "font-family",
-    "font-size",
-    "font-weight",
-    "font-style",
-    "color",
-    "background-color",
-    "direction",
-    "unicode-bidi",
-    "table-layout",
-    "white-space",
-  ];
+  const iframeDoc = iframe.contentDocument;
+  if (!iframeDoc) throw new Error("Could not access iframe document");
 
-  const inline = (srcEl: HTMLElement, dstEl: HTMLElement) => {
-    const cs = getComputedStyle(srcEl);
-    for (const p of PROPS) {
-      dstEl.style.setProperty(p, cs.getPropertyValue(p));
+  // Match the parent page's base URL so relative resources (images etc.) resolve
+  const base = iframeDoc.createElement("base");
+  base.href = document.baseURI;
+  iframeDoc.head.appendChild(base);
+
+  // Copy @font-face rules so custom / web fonts render inside the iframe
+  const fontRules: string[] = [];
+  for (const sheet of document.styleSheets) {
+    try {
+      for (const rule of sheet.cssRules) {
+        if (rule instanceof CSSFontFaceRule) {
+          fontRules.push(rule.cssText);
+        }
+      }
+    } catch (_) {
+      // Cross-origin stylesheet — skip
     }
-  };
-
-  // Inline on the container itself
-  inline(source, clone);
-
-  // Inline on every descendant element
-  const srcAll = source.querySelectorAll("*");
-  const dstAll = clone.querySelectorAll("*");
-  const len = Math.min(srcAll.length, dstAll.length);
-  for (let i = 0; i < len; i++) {
-    inline(srcAll[i] as HTMLElement, dstAll[i] as HTMLElement);
   }
+  if (fontRules.length > 0) {
+    const style = iframeDoc.createElement("style");
+    style.textContent = fontRules.join("\n");
+    iframeDoc.head.appendChild(style);
+  }
+
+  const clone = source.cloneNode(true) as HTMLElement;
+  Object.assign(clone.style, {
+    boxSizing: "border-box",
+    width: pageWidth + "mm",
+  });
+
+  iframeDoc.body.style.margin = "0";
+  iframeDoc.body.appendChild(clone);
+
+  // Override remove() so every caller automatically tears down the iframe
+  clone.remove = () => iframe.remove();
+
+  return clone;
 }
 
 /**
@@ -270,6 +251,7 @@ function splitOversizedText(
   container: HTMLElement,
   pageContentPx: number,
 ): void {
+  const ownerDoc = container.ownerDocument;
   for (const el of Array.from(container.querySelectorAll(":scope > *"))) {
     const htmlEl = el as HTMLElement;
     if (htmlEl.offsetHeight <= pageContentPx || htmlEl.tagName === "TABLE")
@@ -277,10 +259,10 @@ function splitOversizedText(
 
     const tag = htmlEl.tagName;
     const styleAttr = htmlEl.getAttribute("style") || "";
-    const width = getComputedStyle(htmlEl).width;
+    const width = ownerDoc.defaultView!.getComputedStyle(htmlEl).width;
     const words = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
 
-    const measure = document.createElement(tag);
+    const measure = ownerDoc.createElement(tag);
     measure.setAttribute("style", styleAttr);
     Object.assign(measure.style, {
       position: "absolute",
@@ -306,7 +288,7 @@ function splitOversizedText(
         }
       }
 
-      const chunk = document.createElement(tag);
+      const chunk = ownerDoc.createElement(tag);
       chunk.setAttribute("style", styleAttr);
       chunk.textContent = words.slice(start, lo).join(" ");
       chunks.push(chunk);
@@ -327,6 +309,7 @@ function insertPageBreakSpacers(
   container: HTMLElement,
   pageContentPx: number,
 ): void {
+  const ownerDoc = container.ownerDocument;
   const children = Array.from(container.children) as HTMLElement[];
   for (const child of children) {
     const childTop = child.offsetTop;
@@ -334,7 +317,7 @@ function insertPageBreakSpacers(
     const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
     if (childBottom > pageEnd && child.offsetHeight <= pageContentPx) {
-      const spacer = document.createElement("div");
+      const spacer = ownerDoc.createElement("div");
       spacer.style.height = pageEnd - childTop + 1 + "px";
       child.parentNode!.insertBefore(spacer, child);
     }
@@ -354,7 +337,6 @@ function prepare(
   const merged = resolveOptions(opts);
 
   const clone = createPrintClone(source, merged.pageWidth);
-  inlineComputedStyles(source, clone);
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
@@ -419,8 +401,6 @@ async function renderImagePDF(
   const merged = resolveOptions(opts);
 
   const clone = createPrintClone(source, merged.pageWidth);
-  clone.style.opacity = "1";
-  clone.style.left = "-99999px";
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
@@ -515,7 +495,6 @@ export {
   PAGE_MARGINS,
   computeLayout,
   createPrintClone,
-  inlineComputedStyles,
   normalizeTableAttributes,
   splitOversizedTables,
   splitOversizedText,
