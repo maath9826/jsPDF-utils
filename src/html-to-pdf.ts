@@ -309,6 +309,7 @@ async function renderImagePDF(
 
   const clone = createPrintClone(source);
   clone.style.opacity = "1";
+  clone.style.left = "-99999px";
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
