@@ -60,14 +60,14 @@ function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
 /**
  * Clone an element and position it off-screen at print width for measurement.
  */
-function createPrintClone(source: HTMLElement): HTMLElement {
+function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
   Object.assign(clone.style, {
     position: "fixed",
     top: "0",
     left: "0",
     boxSizing: "border-box",
-    width: "210mm",
+    width: pageWidth + "mm",
     opacity: "0.000001",
     pointerEvents: "none",
   });
@@ -238,7 +238,7 @@ function prepare(
     margin: { ...DEFAULT_OPTIONS.margin, ...opts.margin },
   };
 
-  const clone = createPrintClone(source);
+  const clone = createPrintClone(source, merged.pageWidth);
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
@@ -307,7 +307,7 @@ async function renderImagePDF(
     margin: { ...DEFAULT_OPTIONS.margin, ...opts.margin },
   };
 
-  const clone = createPrintClone(source);
+  const clone = createPrintClone(source, merged.pageWidth);
   clone.style.opacity = "1";
   clone.style.left = "-99999px";
   normalizeTableAttributes(clone);
