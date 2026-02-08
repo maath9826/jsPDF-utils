@@ -113,65 +113,20 @@ function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
 }
 
 /**
- * Clone an element into a hidden iframe so that the page's CSS frameworks
- * (Tailwind, Bootstrap, etc.) cannot interfere with PDF rendering.
- *
- * Only @font-face rules are copied into the iframe so custom fonts still work.
- * The returned element's `.remove()` method cleans up the iframe automatically.
+ * Clone an element and position it off-screen at print width for measurement.
  */
 function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
-  const iframe = document.createElement("iframe");
-  Object.assign(iframe.style, {
+  const clone = source.cloneNode(true) as HTMLElement;
+  Object.assign(clone.style, {
     position: "fixed",
     top: "0",
-    left: "-99999px",
+    left: "0",
+    boxSizing: "border-box",
     width: pageWidth + "mm",
-    height: "99999px",
-    border: "none",
     opacity: "0.000001",
     pointerEvents: "none",
   });
-  document.body.appendChild(iframe);
-
-  const iframeDoc = iframe.contentDocument;
-  if (!iframeDoc) throw new Error("Could not access iframe document");
-
-  // Match the parent page's base URL so relative resources (images etc.) resolve
-  const base = iframeDoc.createElement("base");
-  base.href = document.baseURI;
-  iframeDoc.head.appendChild(base);
-
-  // Copy @font-face rules so custom / web fonts render inside the iframe
-  const fontRules: string[] = [];
-  for (const sheet of document.styleSheets) {
-    try {
-      for (const rule of sheet.cssRules) {
-        if (rule instanceof CSSFontFaceRule) {
-          fontRules.push(rule.cssText);
-        }
-      }
-    } catch (_) {
-      // Cross-origin stylesheet — skip
-    }
-  }
-  if (fontRules.length > 0) {
-    const style = iframeDoc.createElement("style");
-    style.textContent = fontRules.join("\n");
-    iframeDoc.head.appendChild(style);
-  }
-
-  const clone = source.cloneNode(true) as HTMLElement;
-  Object.assign(clone.style, {
-    boxSizing: "border-box",
-    width: pageWidth + "mm",
-  });
-
-  iframeDoc.body.style.margin = "0";
-  iframeDoc.body.appendChild(clone);
-
-  // Override remove() so every caller automatically tears down the iframe
-  clone.remove = () => iframe.remove();
-
+  document.body.appendChild(clone);
   return clone;
 }
 
@@ -251,7 +206,6 @@ function splitOversizedText(
   container: HTMLElement,
   pageContentPx: number,
 ): void {
-  const ownerDoc = container.ownerDocument;
   for (const el of Array.from(container.querySelectorAll(":scope > *"))) {
     const htmlEl = el as HTMLElement;
     if (htmlEl.offsetHeight <= pageContentPx || htmlEl.tagName === "TABLE")
@@ -259,10 +213,10 @@ function splitOversizedText(
 
     const tag = htmlEl.tagName;
     const styleAttr = htmlEl.getAttribute("style") || "";
-    const width = ownerDoc.defaultView!.getComputedStyle(htmlEl).width;
+    const width = getComputedStyle(htmlEl).width;
     const words = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
 
-    const measure = ownerDoc.createElement(tag);
+    const measure = document.createElement(tag);
     measure.setAttribute("style", styleAttr);
     Object.assign(measure.style, {
       position: "absolute",
@@ -288,7 +242,7 @@ function splitOversizedText(
         }
       }
 
-      const chunk = ownerDoc.createElement(tag);
+      const chunk = document.createElement(tag);
       chunk.setAttribute("style", styleAttr);
       chunk.textContent = words.slice(start, lo).join(" ");
       chunks.push(chunk);
@@ -309,7 +263,6 @@ function insertPageBreakSpacers(
   container: HTMLElement,
   pageContentPx: number,
 ): void {
-  const ownerDoc = container.ownerDocument;
   const children = Array.from(container.children) as HTMLElement[];
   for (const child of children) {
     const childTop = child.offsetTop;
@@ -317,7 +270,7 @@ function insertPageBreakSpacers(
     const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
     if (childBottom > pageEnd && child.offsetHeight <= pageContentPx) {
-      const spacer = ownerDoc.createElement("div");
+      const spacer = document.createElement("div");
       spacer.style.height = pageEnd - childTop + 1 + "px";
       child.parentNode!.insertBefore(spacer, child);
     }
@@ -401,6 +354,8 @@ async function renderImagePDF(
   const merged = resolveOptions(opts);
 
   const clone = createPrintClone(source, merged.pageWidth);
+  clone.style.opacity = "1";
+  clone.style.left = "-99999px";
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
