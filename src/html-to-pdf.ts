@@ -16,8 +16,16 @@ export interface Margin {
 }
 
 export type PageFormat =
-  | "a0" | "a1" | "a2" | "a3" | "a4" | "a5" | "a6"
-  | "letter" | "legal" | "tabloid";
+  | "a0"
+  | "a1"
+  | "a2"
+  | "a3"
+  | "a4"
+  | "a5"
+  | "a6"
+  | "letter"
+  | "legal"
+  | "tabloid";
 
 export interface PageOptions {
   unit: string;
@@ -123,28 +131,67 @@ function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
 }
 
 /**
- * Reset framework/global CSS on table elements inside the clone so that
- * jsPDF's doc.html() renderer produces consistent output regardless of
- * the host page's CSS environment (e.g. Tailwind preflight, CSS resets).
+ * Inline computed styles from `source` onto the matching elements in `clone`.
  *
- * Uses `all: revert` to roll back author-stylesheet properties to
- * user-agent defaults while preserving inline styles set by the caller.
- *
- * Returns a cleanup function that removes the injected style element.
+ * jsPDF's doc.html() has its own CSS engine that can misinterpret styles
+ * injected by frameworks like Tailwind. By "baking" the browser's computed
+ * values as inline styles on the clone, we bypass jsPDF's CSS processing
+ * entirely and get consistent output across all environments.
  */
-function resetFrameworkCSS(clone: HTMLElement): () => void {
-  const uid = "__jspdf_" + Math.random().toString(36).slice(2, 8);
-  clone.dataset.jspdfClone = uid;
+function inlineComputedStyles(source: HTMLElement, clone: HTMLElement): void {
+  const PROPS = [
+    "display",
+    "vertical-align",
+    "text-align",
+    "line-height",
+    "box-sizing",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "border-top-style",
+    "border-right-style",
+    "border-bottom-style",
+    "border-left-style",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "border-collapse",
+    "border-spacing",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "color",
+    "background-color",
+    "direction",
+    "unicode-bidi",
+    "table-layout",
+    "white-space",
+  ];
 
-  const sel = `[data-jspdf-clone="${uid}"]`;
-  const tags = ["table", "thead", "tbody", "tfoot", "tr", "td", "th"];
-  const rule = tags.map((t) => `${sel} ${t}`).join(",") + "{all:revert}";
+  const inline = (srcEl: HTMLElement, dstEl: HTMLElement) => {
+    const cs = getComputedStyle(srcEl);
+    for (const p of PROPS) {
+      dstEl.style.setProperty(p, cs.getPropertyValue(p));
+    }
+  };
 
-  const style = document.createElement("style");
-  style.textContent = rule;
-  document.head.appendChild(style);
+  // Inline on the container itself
+  inline(source, clone);
 
-  return () => style.remove();
+  // Inline on every descendant element
+  const srcAll = source.querySelectorAll("*");
+  const dstAll = clone.querySelectorAll("*");
+  const len = Math.min(srcAll.length, dstAll.length);
+  for (let i = 0; i < len; i++) {
+    inline(srcAll[i] as HTMLElement, dstAll[i] as HTMLElement);
+  }
 }
 
 /**
@@ -307,7 +354,7 @@ function prepare(
   const merged = resolveOptions(opts);
 
   const clone = createPrintClone(source, merged.pageWidth);
-  const cleanupCSS = resetFrameworkCSS(clone);
+  inlineComputedStyles(source, clone);
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
@@ -319,10 +366,7 @@ function prepare(
     clone,
     layout,
     options: merged,
-    cleanup: () => {
-      cleanupCSS();
-      clone.remove();
-    },
+    cleanup: () => clone.remove(),
   };
 }
 
@@ -471,7 +515,7 @@ export {
   PAGE_MARGINS,
   computeLayout,
   createPrintClone,
-  resetFrameworkCSS,
+  inlineComputedStyles,
   normalizeTableAttributes,
   splitOversizedTables,
   splitOversizedText,
