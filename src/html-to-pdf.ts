@@ -131,6 +131,19 @@ function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
 }
 
 /**
+ * Inject a global style reset to counteract CSS framework base styles
+ * (e.g., Tailwind's `img { display: block }`) that break jsPDF/html2canvas
+ * rendering. Returns a cleanup function that removes the injected style.
+ */
+function injectRenderResetStyles(): () => void {
+  const style = document.createElement("style");
+  style.setAttribute("data-jspdf-utils", "");
+  style.textContent = "img { display: inline !important; }";
+  document.head.appendChild(style);
+  return () => style.remove();
+}
+
+/**
  * Convert HTML table attributes (cellpadding, cellspacing, border) to
  * inline CSS so doc.html()'s renderer picks them up.
  */
@@ -289,6 +302,7 @@ function prepare(
 ): PrepareResult {
   const merged = resolveOptions(opts);
 
+  const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
@@ -301,7 +315,10 @@ function prepare(
     clone,
     layout,
     options: merged,
-    cleanup: () => clone.remove(),
+    cleanup: () => {
+      clone.remove();
+      removeResetStyles();
+    },
   };
 }
 
@@ -353,6 +370,7 @@ async function renderImagePDF(
   const { imageFormat = "JPEG", imageQuality = 1, scale = 2 } = opts;
   const merged = resolveOptions(opts);
 
+  const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
   clone.style.opacity = "1";
   clone.style.left = "-99999px";
@@ -442,6 +460,7 @@ async function renderImagePDF(
     return imagePDF;
   } finally {
     clone.remove();
+    removeResetStyles();
   }
 }
 
