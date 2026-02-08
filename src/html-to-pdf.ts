@@ -123,6 +123,31 @@ function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
 }
 
 /**
+ * Reset framework/global CSS on table elements inside the clone so that
+ * jsPDF's doc.html() renderer produces consistent output regardless of
+ * the host page's CSS environment (e.g. Tailwind preflight, CSS resets).
+ *
+ * Uses `all: revert` to roll back author-stylesheet properties to
+ * user-agent defaults while preserving inline styles set by the caller.
+ *
+ * Returns a cleanup function that removes the injected style element.
+ */
+function resetFrameworkCSS(clone: HTMLElement): () => void {
+  const uid = "__jspdf_" + Math.random().toString(36).slice(2, 8);
+  clone.dataset.jspdfClone = uid;
+
+  const sel = `[data-jspdf-clone="${uid}"]`;
+  const tags = ["table", "thead", "tbody", "tfoot", "tr", "td", "th"];
+  const rule = tags.map((t) => `${sel} ${t}`).join(",") + "{all:revert}";
+
+  const style = document.createElement("style");
+  style.textContent = rule;
+  document.head.appendChild(style);
+
+  return () => style.remove();
+}
+
+/**
  * Convert HTML table attributes (cellpadding, cellspacing, border) to
  * inline CSS so doc.html()'s renderer picks them up.
  */
@@ -282,6 +307,7 @@ function prepare(
   const merged = resolveOptions(opts);
 
   const clone = createPrintClone(source, merged.pageWidth);
+  const cleanupCSS = resetFrameworkCSS(clone);
   normalizeTableAttributes(clone);
   const layout = computeLayout(clone, merged);
 
@@ -293,7 +319,10 @@ function prepare(
     clone,
     layout,
     options: merged,
-    cleanup: () => clone.remove(),
+    cleanup: () => {
+      cleanupCSS();
+      clone.remove();
+    },
   };
 }
 
@@ -442,6 +471,7 @@ export {
   PAGE_MARGINS,
   computeLayout,
   createPrintClone,
+  resetFrameworkCSS,
   normalizeTableAttributes,
   splitOversizedTables,
   splitOversizedText,
