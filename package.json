@@ -1,6 +1,6 @@
 {
   "name": "jspdf-utils",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Utility helpers for jsPDF's doc.html() renderer with automatic page breaking, table splitting, and RTL support",
   "type": "module",
   "main": "dist/html-to-pdf.js",
