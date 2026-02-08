@@ -1,16 +1,38 @@
 {
   "name": "jspdf-utils",
   "version": "0.1.0",
-  "description": "Utility helpers for jsPDF's doc.html() renderer",
+  "description": "Utility helpers for jsPDF's doc.html() renderer with automatic page breaking, table splitting, and RTL support",
   "type": "module",
   "main": "dist/html-to-pdf.js",
   "types": "dist/html-to-pdf.d.ts",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/html-to-pdf.d.ts",
       "import": "./dist/html-to-pdf.js"
     }
   },
+  "keywords": [
+    "jspdf",
+    "html-to-pdf",
+    "pdf",
+    "page-break",
+    "table-split",
+    "rtl",
+    "arabic"
+  ],
+  "author": "Muaath <muath.ghassan98@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maath9826/jsPDF-utils.git"
+  },
+  "bugs": {
+    "url": "https://github.com/maath9826/jsPDF-utils/issues"
+  },
+  "homepage": "https://github.com/maath9826/jsPDF-utils#readme",
   "peerDependencies": {
     "html2canvas": "^1.4.1",
     "jspdf": "^4.1.0"
@@ -19,7 +41,8 @@
     "dev": "vite",
     "build": "vite build && tsc --emitDeclarationOnly",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "html2canvas": "^1.4.1",
