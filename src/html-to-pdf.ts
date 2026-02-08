@@ -15,13 +15,45 @@ export interface Margin {
   left: number;
 }
 
+export type PageFormat =
+  | "a0" | "a1" | "a2" | "a3" | "a4" | "a5" | "a6"
+  | "letter" | "legal" | "tabloid";
+
 export interface PageOptions {
   unit: string;
-  format: string;
+  format: PageFormat;
   pageWidth: number;
   pageHeight: number;
   margin: Margin;
 }
+
+/** Standard page dimensions in mm (portrait). */
+const PAGE_SIZES: Record<PageFormat, [number, number]> = {
+  a0: [841, 1189],
+  a1: [594, 841],
+  a2: [420, 594],
+  a3: [297, 420],
+  a4: [210, 297],
+  a5: [148, 210],
+  a6: [105, 148],
+  letter: [215.9, 279.4],
+  legal: [215.9, 355.6],
+  tabloid: [279.4, 431.8],
+};
+
+/** Standard margins in mm per format. */
+const PAGE_MARGINS: Record<PageFormat, number> = {
+  a0: 40,
+  a1: 35,
+  a2: 30,
+  a3: 25,
+  a4: 25,
+  a5: 20,
+  a6: 12,
+  letter: 25.4,
+  legal: 25.4,
+  tabloid: 25,
+};
 
 export interface Layout {
   renderedWidth: number;
@@ -37,14 +69,29 @@ export interface PrepareResult {
   cleanup: () => void;
 }
 
-/** Default page layout (A4, millimetres). */
-const DEFAULT_OPTIONS: PageOptions = {
-  unit: "mm",
-  format: "a4",
-  pageWidth: 210,
-  pageHeight: 297,
-  margin: { top: 20, right: 20, bottom: 20, left: 20 },
-};
+/** Resolve options: dimensions inferred from format unless explicitly provided. */
+function resolveOptions(opts: Partial<PageOptions> = {}): PageOptions {
+  const format = opts.format ?? "a4";
+  const [defaultWidth, defaultHeight] = PAGE_SIZES[format];
+  const pageWidth = opts.pageWidth ?? defaultWidth;
+  const pageHeight = opts.pageHeight ?? defaultHeight;
+
+  const defaultMargin = PAGE_MARGINS[format];
+  const defaultMarginObj: Margin = {
+    top: defaultMargin,
+    right: defaultMargin,
+    bottom: defaultMargin,
+    left: defaultMargin,
+  };
+
+  return {
+    unit: opts.unit ?? "mm",
+    format,
+    pageWidth,
+    pageHeight,
+    margin: { ...defaultMarginObj, ...opts.margin },
+  };
+}
 
 /** Compute derived layout values from options. */
 function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
@@ -232,11 +279,7 @@ function prepare(
   source: HTMLElement,
   opts: Partial<PageOptions> = {},
 ): PrepareResult {
-  const merged: PageOptions = {
-    ...DEFAULT_OPTIONS,
-    ...opts,
-    margin: { ...DEFAULT_OPTIONS.margin, ...opts.margin },
-  };
+  const merged = resolveOptions(opts);
 
   const clone = createPrintClone(source, merged.pageWidth);
   normalizeTableAttributes(clone);
@@ -300,12 +343,7 @@ async function renderImagePDF(
   opts: Partial<PageOptions> & ImagePDFOptions = {},
 ): Promise<jsPDF> {
   const { imageFormat = "JPEG", imageQuality = 1, scale = 2 } = opts;
-
-  const merged: PageOptions = {
-    ...DEFAULT_OPTIONS,
-    ...opts,
-    margin: { ...DEFAULT_OPTIONS.margin, ...opts.margin },
-  };
+  const merged = resolveOptions(opts);
 
   const clone = createPrintClone(source, merged.pageWidth);
   clone.style.opacity = "1";
@@ -400,7 +438,8 @@ async function renderImagePDF(
 }
 
 export {
-  DEFAULT_OPTIONS,
+  PAGE_SIZES,
+  PAGE_MARGINS,
   computeLayout,
   createPrintClone,
   normalizeTableAttributes,
