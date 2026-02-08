@@ -74,7 +74,9 @@
         const target = document.getElementById("print-section");
         if (!target) return;
 
-        const imagePDF = await renderImagePDF(target);
+        const imagePDF = await renderImagePDF(target, {
+          format: "a5",
+        });
         imagePDF.save("doc-html-renderer-test.pdf");
       });
     </script>

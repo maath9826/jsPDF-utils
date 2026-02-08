@@ -35,7 +35,7 @@
   "homepage": "https://github.com/maath9826/jsPDF-utils#readme",
   "peerDependencies": {
     "html2canvas": "^1.4.1",
-    "jspdf": "^4.1.0"
+    "jspdf": ">=2.5.0"
   },
   "scripts": {
     "dev": "vite",
