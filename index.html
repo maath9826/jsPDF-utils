@@ -27,6 +27,8 @@
     </p>
     <button id="generate-html">Generate PDF (doc.html)</button>
     <button id="generate-html-2">Generate PDF image</button>
+    <button id="preview-images">Preview as images</button>
+    <div id="preview-container"></div>
     <div
       id="print-section"
       dir="rtl"
@@ -926,7 +928,11 @@
     </div>
 
     <script type="module">
-      import { renderImagePDF, renderHTML } from "./src/html-to-pdf.js";
+      import {
+        renderImagePDF,
+        renderHTML,
+        previewPageImages,
+      } from "./src/html-to-pdf.js";
       import { jsPDF } from "jspdf";
 
       const doc = new jsPDF({ format: "a4" });
@@ -936,6 +942,8 @@
 
       const htmlButton = document.getElementById("generate-html");
       const imageButton = document.getElementById("generate-html-2");
+      const previewImagesButton = document.getElementById("preview-images");
+      const previewContainer = document.getElementById("preview-container");
 
       htmlButton.addEventListener("click", async () => {
         const target = document.getElementById("print-section");
@@ -955,6 +963,14 @@
           format: "a4",
         });
         imagePDF.save("doc-html-renderer-test.pdf");
+      });
+
+      // Preview as page images
+      previewImagesButton.addEventListener("click", async () => {
+        const target = document.getElementById("print-section");
+        if (!target) return;
+
+        await previewPageImages(target, previewContainer, { format: "a4" });
       });
     </script>
   </body>

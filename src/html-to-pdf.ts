@@ -464,6 +464,134 @@ async function renderImagePDF(
   }
 }
 
+/**
+ * Render an HTML element to an array of page images (data URLs).
+ * Each image represents a full page with margins, matching the
+ * visual output of renderImagePDF.
+ */
+async function renderPageImages(
+  source: HTMLElement,
+  opts: Partial<PageOptions> & ImagePDFOptions = {},
+): Promise<string[]> {
+  const { imageFormat = "PNG", imageQuality = 1, scale = 2 } = opts;
+  const merged = resolveOptions(opts);
+
+  const removeResetStyles = injectRenderResetStyles();
+  const clone = createPrintClone(source, merged.pageWidth);
+  clone.style.opacity = "1";
+  clone.style.left = "-99999px";
+  normalizeTableAttributes(clone);
+  const layout = computeLayout(clone, merged);
+
+  splitOversizedTables(clone, layout.pageContentPx);
+  splitOversizedText(clone, layout.pageContentPx);
+  insertPageBreakSpacers(clone, layout.pageContentPx);
+
+  try {
+    const canvas = await html2canvas(clone, {
+      scale,
+      backgroundColor: "#ffffff",
+    });
+
+    const contentWidthMm =
+      merged.pageWidth - merged.margin.left - merged.margin.right;
+    const contentHeightMm =
+      merged.pageHeight - merged.margin.top - merged.margin.bottom;
+
+    const contentWidthPx = canvas.width;
+    const contentHeightPx = (contentHeightMm / contentWidthMm) * contentWidthPx;
+
+    // Compute full page dimensions in pixels (including margins)
+    const pxPerMm = contentWidthPx / contentWidthMm;
+    const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
+    const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
+    const marginTopPx = Math.round(merged.margin.top * pxPerMm);
+    const marginLeftPx = Math.round(merged.margin.left * pxPerMm);
+
+    const totalPages = Math.ceil(canvas.height / contentHeightPx);
+    const images: string[] = [];
+
+    for (let i = 0; i < totalPages; i++) {
+      const sliceHeight = Math.min(
+        contentHeightPx,
+        canvas.height - i * contentHeightPx,
+      );
+
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = pageWidthPx;
+      pageCanvas.height = pageHeightPx;
+
+      const ctx = pageCanvas.getContext("2d");
+      if (!ctx) throw new Error("Could not get canvas context");
+
+      // Fill with white (the full page background)
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageWidthPx, pageHeightPx);
+
+      // Draw the content slice at the margin offset
+      ctx.drawImage(
+        canvas,
+        0,
+        i * contentHeightPx,
+        contentWidthPx,
+        sliceHeight,
+        marginLeftPx,
+        marginTopPx,
+        contentWidthPx,
+        sliceHeight,
+      );
+
+      images.push(
+        pageCanvas.toDataURL(
+          `image/${imageFormat.toLowerCase()}`,
+          imageQuality,
+        ),
+      );
+    }
+
+    return images;
+  } finally {
+    clone.remove();
+    removeResetStyles();
+  }
+}
+
+/**
+ * Render an HTML element as page images and inject them into a scrollable
+ * container. Each image is sized to match the page format dimensions.
+ */
+async function previewPageImages(
+  source: HTMLElement,
+  container: HTMLElement,
+  opts: Partial<PageOptions> & ImagePDFOptions = {},
+): Promise<void> {
+  const merged = resolveOptions(opts);
+  const images = await renderPageImages(source, opts);
+
+  container.innerHTML = "";
+  Object.assign(container.style, {
+    width: merged.pageWidth + "mm",
+    height: merged.pageHeight + "mm",
+    overflowY: "auto",
+    background: "#e0e0e0",
+  });
+
+  for (let i = 0; i < images.length; i++) {
+    const img = document.createElement("img");
+    img.src = images[i];
+    img.alt = `Page ${i + 1}`;
+    Object.assign(img.style, {
+      width: merged.pageWidth + "mm",
+      boxSizing: "border-box",
+      display: "block",
+      border: "1px solid #bbb",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+      marginBottom: "16px",
+    });
+    container.appendChild(img);
+  }
+}
+
 export {
   PAGE_SIZES,
   PAGE_MARGINS,
@@ -476,4 +604,6 @@ export {
   prepare,
   renderHTML,
   renderImagePDF,
+  renderPageImages,
+  previewPageImages,
 };
