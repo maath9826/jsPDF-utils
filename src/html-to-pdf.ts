@@ -570,8 +570,9 @@ async function previewPageImages(
 
   container.innerHTML = "";
   Object.assign(container.style, {
-    width: merged.pageWidth + "mm",
+    width: "fit-content",
     height: merged.pageHeight + "mm",
+    maxHeight: "100vh",
     overflowY: "auto",
     background: "#e0e0e0",
   });
@@ -582,6 +583,8 @@ async function previewPageImages(
     img.alt = `Page ${i + 1}`;
     Object.assign(img.style, {
       width: merged.pageWidth + "mm",
+      maxWidth: "100%",
+      height: "auto",
       boxSizing: "border-box",
       display: "block",
       border: "1px solid #bbb",
