@@ -328,7 +328,7 @@ function prepare(
 async function renderHTML(
   doc: jsPDF,
   source: HTMLElement,
-  opts: Partial<PageOptions> = {},
+  opts: Partial<PageOptions> & Pick<ImagePDFOptions, "marginContent"> = {},
 ): Promise<jsPDF> {
   const { clone, layout, options, cleanup } = prepare(source, opts);
 
@@ -350,13 +350,301 @@ async function renderHTML(
     cleanup();
   }
 
+  if (opts.marginContent) {
+    await addMarginContent(doc, opts.marginContent, opts);
+  }
+
   return doc;
+}
+
+type MarginSlot = "top" | "right" | "bottom" | "left";
+type MarginFactory = (page: number, totalPages: number) => HTMLElement;
+
+export interface ContentBorder {
+  /** Stroke color (default: "#000000") */
+  color?: string;
+  /** Line width in mm (default: 0.3) */
+  width?: number;
+  /** Distance in mm from the page edge to the border (default: uses page margins). */
+  margin?: number | { top?: number; right?: number; bottom?: number; left?: number };
+}
+
+export interface TextBorder {
+  /** The text to repeat along all four edges. */
+  text: string;
+  /** Text color (default: "#000000") */
+  color?: string;
+  /** Font size in mm (default: 2.5) */
+  fontSize?: number;
+  /** Font family (default: "Arial, sans-serif") */
+  fontFamily?: string;
+  /** Gap between repetitions in mm (default: fontSize * 0.5) */
+  gap?: number;
+  /** Distance in mm from the page edge to the text border (default: uses page margins). */
+  margin?: number | { top?: number; right?: number; bottom?: number; left?: number };
+}
+
+export interface MarginContentInput {
+  top?: HTMLElement | MarginFactory;
+  right?: HTMLElement | MarginFactory;
+  bottom?: HTMLElement | MarginFactory;
+  left?: HTMLElement | MarginFactory;
+  /** Draw a rectangle border around the content area. */
+  contentBorder?: ContentBorder;
+  /** Draw a repeated-text border around the content area. */
+  textBorder?: TextBorder;
 }
 
 export interface ImagePDFOptions {
   imageFormat?: "JPEG" | "PNG";
   imageQuality?: number;
   scale?: number;
+  marginContent?: MarginContentInput;
+}
+
+function getSlotRect(
+  slot: MarginSlot,
+  opts: PageOptions,
+): { x: number; y: number; width: number; height: number } {
+  switch (slot) {
+    case "top":
+      return { x: 0, y: 0, width: opts.pageWidth, height: opts.margin.top };
+    case "bottom":
+      return {
+        x: 0,
+        y: opts.pageHeight - opts.margin.bottom,
+        width: opts.pageWidth,
+        height: opts.margin.bottom,
+      };
+    case "left":
+      return { x: 0, y: 0, width: opts.margin.left, height: opts.pageHeight };
+    case "right":
+      return {
+        x: opts.pageWidth - opts.margin.right,
+        y: 0,
+        width: opts.margin.right,
+        height: opts.pageHeight,
+      };
+  }
+}
+
+async function renderSlotToCanvas(
+  el: HTMLElement,
+  widthMm: number,
+  heightMm: number,
+  scale: number,
+): Promise<HTMLCanvasElement> {
+  const wrapper = document.createElement("div");
+  Object.assign(wrapper.style, {
+    position: "fixed",
+    left: "-99999px",
+    top: "0",
+    width: widthMm + "mm",
+    height: heightMm + "mm",
+    overflow: "hidden",
+  });
+  wrapper.appendChild(el);
+  document.body.appendChild(wrapper);
+
+  try {
+    return await html2canvas(wrapper, {
+      scale,
+      backgroundColor: null,
+    });
+  } finally {
+    wrapper.remove();
+  }
+}
+
+const MARGIN_SLOTS: MarginSlot[] = ["top", "right", "bottom", "left"];
+
+/** Pre-render static (non-function) margin content once for reuse across pages. */
+async function preRenderStaticSlots(
+  content: MarginContentInput,
+  opts: PageOptions,
+  scale: number,
+): Promise<Partial<Record<MarginSlot, HTMLCanvasElement>>> {
+  const cache: Partial<Record<MarginSlot, HTMLCanvasElement>> = {};
+  for (const slot of MARGIN_SLOTS) {
+    const val = content[slot];
+    if (val && typeof val !== "function") {
+      const rect = getSlotRect(slot, opts);
+      cache[slot] = await renderSlotToCanvas(
+        val.cloneNode(true) as HTMLElement,
+        rect.width,
+        rect.height,
+        scale,
+      );
+    }
+  }
+  return cache;
+}
+
+/** Resolve a margin override shared by ContentBorder and TextBorder. */
+function resolveMarginOverride(
+  m: undefined | number | { top?: number; right?: number; bottom?: number; left?: number },
+  opts: PageOptions,
+): Margin {
+  if (m == null) return opts.margin;
+  if (typeof m === "number") {
+    return { top: m, right: m, bottom: m, left: m };
+  }
+  return {
+    top: m.top ?? opts.margin.top,
+    right: m.right ?? opts.margin.right,
+    bottom: m.bottom ?? opts.margin.bottom,
+    left: m.left ?? opts.margin.left,
+  };
+}
+
+/** Draw a repeated-text rectangle on a canvas. */
+function drawTextBorderOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  tb: TextBorder,
+  pxPerMm: number,
+  rectX: number,
+  rectY: number,
+  rectW: number,
+  rectH: number,
+): void {
+  const {
+    text,
+    color = "#000000",
+    fontSize = 2.5,
+    fontFamily = "Arial, sans-serif",
+  } = tb;
+  const fontSizePx = fontSize * pxPerMm;
+  const gapPx = (tb.gap ?? fontSize * 0.5) * pxPerMm;
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${fontSizePx}px ${fontFamily}`;
+  ctx.textBaseline = "middle";
+
+  const segmentWidth = ctx.measureText(text).width + gapPx;
+
+  // Top edge (left to right)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rectX, rectY - fontSizePx, rectW, fontSizePx * 2);
+  ctx.clip();
+  for (let x = rectX; x < rectX + rectW; x += segmentWidth) {
+    ctx.fillText(text, x, rectY);
+  }
+  ctx.restore();
+
+  // Bottom edge (left to right)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rectX, rectY + rectH - fontSizePx, rectW, fontSizePx * 2);
+  ctx.clip();
+  for (let x = rectX; x < rectX + rectW; x += segmentWidth) {
+    ctx.fillText(text, x, rectY + rectH);
+  }
+  ctx.restore();
+
+  // Left edge (bottom to top)
+  ctx.save();
+  ctx.translate(rectX, rectY + rectH);
+  ctx.rotate(-Math.PI / 2);
+  ctx.beginPath();
+  ctx.rect(0, -fontSizePx, rectH, fontSizePx * 2);
+  ctx.clip();
+  for (let y = 0; y < rectH; y += segmentWidth) {
+    ctx.fillText(text, y, 0);
+  }
+  ctx.restore();
+
+  // Right edge (top to bottom)
+  ctx.save();
+  ctx.translate(rectX + rectW, rectY);
+  ctx.rotate(Math.PI / 2);
+  ctx.beginPath();
+  ctx.rect(0, -fontSizePx, rectH, fontSizePx * 2);
+  ctx.clip();
+  for (let y = 0; y < rectH; y += segmentWidth) {
+    ctx.fillText(text, y, 0);
+  }
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function resolveBorderMargin(
+  border: ContentBorder | TextBorder,
+  opts: PageOptions,
+): Margin {
+  return resolveMarginOverride(border.margin, opts);
+}
+
+/** Render margin content for a single page onto a canvas context. */
+async function drawMarginContentOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  content: MarginContentInput,
+  staticCache: Partial<Record<MarginSlot, HTMLCanvasElement>>,
+  opts: PageOptions,
+  pxPerMm: number,
+  page: number,
+  totalPages: number,
+  scale: number,
+): Promise<void> {
+  for (const slot of MARGIN_SLOTS) {
+    const val = content[slot];
+    if (!val) continue;
+
+    const rect = getSlotRect(slot, opts);
+    let slotCanvas: HTMLCanvasElement;
+
+    if (typeof val === "function") {
+      slotCanvas = await renderSlotToCanvas(
+        val(page, totalPages),
+        rect.width,
+        rect.height,
+        scale,
+      );
+    } else {
+      slotCanvas = staticCache[slot]!;
+    }
+
+    ctx.drawImage(
+      slotCanvas,
+      0,
+      0,
+      slotCanvas.width,
+      slotCanvas.height,
+      Math.round(rect.x * pxPerMm),
+      Math.round(rect.y * pxPerMm),
+      Math.round(rect.width * pxPerMm),
+      Math.round(rect.height * pxPerMm),
+    );
+  }
+
+  if (content.contentBorder) {
+    const { color = "#000000", width = 0.3 } = content.contentBorder;
+    const bm = resolveBorderMargin(content.contentBorder, opts);
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width * pxPerMm;
+    ctx.strokeRect(
+      Math.round(bm.left * pxPerMm),
+      Math.round(bm.top * pxPerMm),
+      Math.round((opts.pageWidth - bm.left - bm.right) * pxPerMm),
+      Math.round((opts.pageHeight - bm.top - bm.bottom) * pxPerMm),
+    );
+  }
+
+  if (content.textBorder) {
+    const bm = resolveBorderMargin(content.textBorder, opts);
+    drawTextBorderOnCanvas(
+      ctx,
+      content.textBorder,
+      pxPerMm,
+      Math.round(bm.left * pxPerMm),
+      Math.round(bm.top * pxPerMm),
+      Math.round((opts.pageWidth - bm.left - bm.right) * pxPerMm),
+      Math.round((opts.pageHeight - bm.top - bm.bottom) * pxPerMm),
+    );
+  }
 }
 
 /**
@@ -457,6 +745,10 @@ async function renderImagePDF(
       );
     }
 
+    if (opts.marginContent) {
+      await addMarginContent(imagePDF, opts.marginContent, opts);
+    }
+
     return imagePDF;
   } finally {
     clone.remove();
@@ -511,6 +803,11 @@ async function renderPageImages(
     const totalPages = Math.ceil(canvas.height / contentHeightPx);
     const images: string[] = [];
 
+    const { marginContent } = opts;
+    const staticCache = marginContent
+      ? await preRenderStaticSlots(marginContent, merged, scale)
+      : {};
+
     for (let i = 0; i < totalPages; i++) {
       const sliceHeight = Math.min(
         contentHeightPx,
@@ -540,6 +837,20 @@ async function renderPageImages(
         contentWidthPx,
         sliceHeight,
       );
+
+      // Draw margin content (headers, footers, borders)
+      if (marginContent) {
+        await drawMarginContentOnCanvas(
+          ctx,
+          marginContent,
+          staticCache,
+          merged,
+          pxPerMm,
+          i + 1,
+          totalPages,
+          scale,
+        );
+      }
 
       images.push(
         pageCanvas.toDataURL(
@@ -595,6 +906,61 @@ async function previewPageImages(
   }
 }
 
+/**
+ * Add HTML content to the margin areas of each page in a jsPDF document.
+ *
+ * Each slot (top, right, bottom, left) accepts either a static HTMLElement
+ * (rendered once and reused on every page) or a factory function that
+ * receives `(page, totalPages)` and returns an HTMLElement per page
+ * (useful for page numbers or dynamic content).
+ */
+async function addMarginContent(
+  doc: jsPDF,
+  content: MarginContentInput,
+  opts: Partial<PageOptions> = {},
+): Promise<jsPDF> {
+  const merged = resolveOptions(opts);
+  const totalPages = doc.getNumberOfPages();
+  const scale = 2;
+  const pxPerMm = scale * (96 / 25.4);
+  const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
+  const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
+
+  const staticCache = await preRenderStaticSlots(content, merged, scale);
+
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+
+    const pageCanvas = document.createElement("canvas");
+    pageCanvas.width = pageWidthPx;
+    pageCanvas.height = pageHeightPx;
+    const ctx = pageCanvas.getContext("2d");
+    if (!ctx) continue;
+
+    await drawMarginContentOnCanvas(
+      ctx,
+      content,
+      staticCache,
+      merged,
+      pxPerMm,
+      i,
+      totalPages,
+      scale,
+    );
+
+    doc.addImage(
+      pageCanvas.toDataURL("image/png"),
+      "PNG",
+      0,
+      0,
+      merged.pageWidth,
+      merged.pageHeight,
+    );
+  }
+
+  return doc;
+}
+
 export {
   PAGE_SIZES,
   PAGE_MARGINS,
@@ -609,4 +975,5 @@ export {
   renderImagePDF,
   renderPageImages,
   previewPageImages,
+  addMarginContent,
 };
