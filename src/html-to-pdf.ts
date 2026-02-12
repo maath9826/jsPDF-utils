@@ -1022,6 +1022,7 @@ async function previewPageImages(
 
   container.innerHTML = "";
   Object.assign(container.style, {
+    direction: "ltr",
     width: "fit-content",
     height: merged.pageHeight + "mm",
     maxHeight: "100vh",
