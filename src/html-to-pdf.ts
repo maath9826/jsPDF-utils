@@ -271,22 +271,163 @@ function splitOversizedText(
   }
 }
 
-/** Insert spacer divs so that no direct child straddles a page boundary. */
+/**
+ * Split a table at a page boundary so the rows that fit stay on the current
+ * page and the remainder starts on the next page (with the header repeated).
+ * Returns true if the split was performed.
+ */
+function splitTableAtBoundary(
+  table: HTMLTableElement,
+  container: HTMLElement,
+  availableHeight: number,
+): boolean {
+  const rows = Array.from(table.rows);
+  if (rows.length === 0) return false;
+
+  const hasHeader = rows[0].querySelector("th") !== null;
+  const headerRow = hasHeader ? rows[0] : null;
+  const bodyRows = hasHeader ? rows.slice(1) : rows;
+  const headerHeight = headerRow ? headerRow.offsetHeight : 0;
+
+  if (bodyRows.length < 2) return false;
+
+  const maxBodyHeight = availableHeight - headerHeight - 2;
+  if (maxBodyHeight <= 0) return false;
+
+  let fitCount = 0;
+  let totalHeight = 0;
+  for (const row of bodyRows) {
+    if (totalHeight + row.offsetHeight > maxBodyHeight) break;
+    totalHeight += row.offsetHeight;
+    fitCount++;
+  }
+
+  if (fitCount === 0 || fitCount === bodyRows.length) return false;
+
+  const firstTable = table.cloneNode(false) as HTMLTableElement;
+  if (headerRow) firstTable.appendChild(headerRow.cloneNode(true));
+  for (let i = 0; i < fitCount; i++) {
+    firstTable.appendChild(bodyRows[i].cloneNode(true));
+  }
+
+  const secondTable = table.cloneNode(false) as HTMLTableElement;
+  if (headerRow) secondTable.appendChild(headerRow.cloneNode(true));
+  for (let i = fitCount; i < bodyRows.length; i++) {
+    secondTable.appendChild(bodyRows[i].cloneNode(true));
+  }
+
+  container.insertBefore(firstTable, table);
+  container.insertBefore(secondTable, table);
+  table.remove();
+  return true;
+}
+
+/**
+ * Split a text element at a page boundary using word-boundary binary search.
+ * Returns true if the split was performed.
+ */
+function splitTextAtBoundary(
+  el: HTMLElement,
+  container: HTMLElement,
+  availableHeight: number,
+): boolean {
+  if (el.tagName === "TABLE" || el.tagName === "IMG") return false;
+  const words = (el.textContent || "").split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+
+  const tag = el.tagName;
+  const styleAttr = el.getAttribute("style") || "";
+  const width = getComputedStyle(el).width;
+
+  const measure = document.createElement(tag);
+  measure.setAttribute("style", styleAttr);
+  Object.assign(measure.style, {
+    position: "absolute",
+    visibility: "hidden",
+    width,
+  });
+  container.appendChild(measure);
+
+  measure.textContent = words[0];
+  if (measure.offsetHeight > availableHeight) {
+    measure.remove();
+    return false;
+  }
+
+  let lo = 1;
+  let hi = words.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    measure.textContent = words.slice(0, mid).join(" ");
+    if (measure.offsetHeight <= availableHeight) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  measure.remove();
+
+  if (lo >= words.length) return false;
+
+  const first = document.createElement(tag);
+  first.setAttribute("style", styleAttr);
+  first.textContent = words.slice(0, lo).join(" ");
+
+  const second = document.createElement(tag);
+  second.setAttribute("style", styleAttr);
+  second.textContent = words.slice(lo).join(" ");
+
+  container.insertBefore(first, el);
+  container.insertBefore(second, el);
+  el.remove();
+  return true;
+}
+
+/**
+ * Insert spacer divs so that no direct child straddles a page boundary.
+ * For tables and text elements, attempts to split at the boundary first
+ * so content fills the current page before flowing to the next.
+ */
 function insertPageBreakSpacers(
   container: HTMLElement,
   pageContentPx: number,
 ): void {
-  const children = Array.from(container.children) as HTMLElement[];
-  for (const child of children) {
+  let i = 0;
+  while (i < container.children.length) {
+    const child = container.children[i] as HTMLElement;
     const childTop = child.offsetTop;
     const childBottom = childTop + child.offsetHeight;
-    const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
+    const pageEnd =
+      (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
-    if (childBottom > pageEnd && child.offsetHeight <= pageContentPx) {
-      const spacer = document.createElement("div");
-      spacer.style.height = pageEnd - childTop + 1 + "px";
-      child.parentNode!.insertBefore(spacer, child);
+    if (childBottom > pageEnd) {
+      const remainingSpace = pageEnd - childTop;
+
+      // Try splitting at the boundary first
+      if (child.tagName === "TABLE") {
+        if (
+          splitTableAtBoundary(
+            child as HTMLTableElement,
+            container,
+            remainingSpace,
+          )
+        ) {
+          continue; // Re-check same index (now holds the first part)
+        }
+      } else if (splitTextAtBoundary(child, container, remainingSpace)) {
+        continue; // Re-check same index
+      }
+
+      // Fallback: push to next page with spacer
+      if (child.offsetHeight <= pageContentPx) {
+        const spacer = document.createElement("div");
+        spacer.style.height = pageEnd - childTop + 1 + "px";
+        child.parentNode!.insertBefore(spacer, child);
+        i++; // Skip past the spacer
+      }
     }
+    i++;
   }
 }
 
