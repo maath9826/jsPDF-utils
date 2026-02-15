@@ -1249,7 +1249,7 @@ async function previewPageImages(
     width: "fit-content",
     height: merged.pageHeight + "mm",
     maxHeight: "100vh",
-    overflowY: "auto",
+    overflowY: images.length > 1 ? "auto" : "hidden",
     background: "#e0e0e0",
   });
 
