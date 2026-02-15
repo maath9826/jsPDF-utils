@@ -647,6 +647,9 @@ function resolveMarginOverride(
 }
 
 /** Draw a repeated-text rectangle on a canvas. */
+const RTL_RE =
+  /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]/;
+
 async function renderTextEdgeStrip(
   text: string,
   widthPx: number,
@@ -656,6 +659,7 @@ async function renderTextEdgeStrip(
   fontWeight: string,
   color: string,
   gapPx: number,
+  rtl: boolean = false,
 ): Promise<HTMLCanvasElement> {
   const wrapper = document.createElement("div");
   Object.assign(wrapper.style, {
@@ -673,6 +677,7 @@ async function renderTextEdgeStrip(
     display: "flex",
     alignItems: "center",
     gap: `${gapPx}px`,
+    direction: rtl ? "rtl" : "ltr",
   });
 
   const measure = document.createElement("span");
@@ -699,7 +704,12 @@ async function renderTextEdgeStrip(
 
   document.body.appendChild(wrapper);
   try {
-    return await html2canvas(wrapper, { scale: 1, backgroundColor: null });
+    return await html2canvas(wrapper, {
+      scale: 1,
+      backgroundColor: null,
+      width: Math.ceil(widthPx),
+      height: Math.ceil(heightPx),
+    });
   } finally {
     wrapper.remove();
   }
@@ -723,37 +733,102 @@ async function drawTextBorderOnCanvas(
   } = tb;
   const fontSizePx = fontSize * pxPerMm;
   const gapPx = (tb.gap ?? fontSize * 0.5) * pxPerMm;
-  const cornerGap = fontSizePx * 0.2;
+  const cornerGap = fontSizePx * 0.5;
   const stripHeight = Math.ceil(fontSizePx * 1.5);
 
+  const isRtl = RTL_RE.test(text);
+  console.log("isRtl", isRtl);
   const hWidth = Math.round(rectW - cornerGap * 2);
   const vWidth = Math.round(rectH - cornerGap * 2);
 
+  // For RTL text: horizontal edges clip from the left (RTL overflow),
+  // vertical edges both use RTL so overflow clips from strip LEFT.
+  // After rotation: left edge clips from page BOTTOM, right edge clips from page TOP.
   const [hStrip, vStrip] = await Promise.all([
-    renderTextEdgeStrip(text, hWidth, stripHeight, fontSizePx, fontFamily, fontWeight, color, gapPx),
-    renderTextEdgeStrip(text, vWidth, stripHeight, fontSizePx, fontFamily, fontWeight, color, gapPx),
+    renderTextEdgeStrip(
+      text,
+      hWidth,
+      stripHeight,
+      fontSizePx,
+      fontFamily,
+      fontWeight,
+      color,
+      gapPx,
+      isRtl,
+    ),
+    renderTextEdgeStrip(
+      text,
+      vWidth,
+      stripHeight,
+      fontSizePx,
+      fontFamily,
+      fontWeight,
+      color,
+      gapPx,
+      isRtl,
+    ),
   ]);
 
   const hOffsetY = Math.round(stripHeight / 2);
 
   // Top edge
-  ctx.drawImage(hStrip, rectX + cornerGap, rectY - hOffsetY);
+  ctx.drawImage(
+    hStrip,
+    0,
+    0,
+    hWidth,
+    stripHeight,
+    rectX + cornerGap,
+    rectY - hOffsetY,
+    hWidth,
+    stripHeight,
+  );
 
   // Bottom edge
-  ctx.drawImage(hStrip, rectX + cornerGap, rectY + rectH - hOffsetY);
+  ctx.drawImage(
+    hStrip,
+    0,
+    0,
+    hWidth,
+    stripHeight,
+    rectX + cornerGap,
+    rectY + rectH - hOffsetY,
+    hWidth,
+    stripHeight,
+  );
 
-  // Left edge (bottom to top)
+  // Left edge (bottom to top) — RTL strip so overflow clips at left = page bottom
   ctx.save();
   ctx.translate(rectX, rectY + rectH - cornerGap);
   ctx.rotate(-Math.PI / 2);
-  ctx.drawImage(vStrip, 0, -hOffsetY);
+  ctx.drawImage(
+    vStrip,
+    0,
+    0,
+    vWidth,
+    stripHeight,
+    0,
+    -hOffsetY,
+    vWidth,
+    stripHeight,
+  );
   ctx.restore();
 
-  // Right edge (top to bottom)
+  // Right edge (top to bottom) — RTL strip so overflow clips at left = page top
   ctx.save();
   ctx.translate(rectX + rectW, rectY + cornerGap);
   ctx.rotate(Math.PI / 2);
-  ctx.drawImage(vStrip, 0, -hOffsetY);
+  ctx.drawImage(
+    vStrip,
+    0,
+    0,
+    vWidth,
+    stripHeight,
+    0,
+    -hOffsetY,
+    vWidth,
+    stripHeight,
+  );
   ctx.restore();
 }
 
