@@ -1286,7 +1286,7 @@ async function addMarginContent(
 ): Promise<jsPDF> {
   const merged = resolveOptions(opts);
   const totalPages = doc.getNumberOfPages();
-  const scale = 2;
+  const scale = 4;
   const pxPerMm = scale * (96 / 25.4);
   const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
   const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
