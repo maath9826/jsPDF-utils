@@ -737,7 +737,7 @@ async function drawTextBorderOnCanvas(
   const stripHeight = Math.ceil(fontSizePx * 1.5);
 
   const isRtl = RTL_RE.test(text);
-  console.log("isRtl", isRtl);
+
   const hWidth = Math.round(rectW - cornerGap * 2);
   const vWidth = Math.round(rectH - cornerGap * 2);
 
@@ -917,7 +917,7 @@ async function renderImagePDF(
   source: HTMLElement,
   opts: Partial<PageOptions> & ImagePDFOptions = {},
 ): Promise<jsPDF> {
-  const { imageFormat = "JPEG", imageQuality = 1, scale = 2 } = opts;
+  const { imageFormat = "JPEG", imageQuality = 0.7, scale = 2 } = opts;
   const merged = resolveOptions(opts);
 
   const removeResetStyles = injectRenderResetStyles();
@@ -1003,7 +1003,7 @@ async function renderImagePDF(
         contentWidthMm,
         sliceHeightMm,
         undefined,
-        "FAST",
+        "SLOW",
       );
     }
 
@@ -1027,7 +1027,7 @@ async function renderPageImages(
   source: HTMLElement,
   opts: Partial<PageOptions> & ImagePDFOptions = {},
 ): Promise<string[]> {
-  const { imageFormat = "PNG", imageQuality = 1, scale = 2 } = opts;
+  const { imageFormat = "PNG", imageQuality = 0.75, scale = 2 } = opts;
   const merged = resolveOptions(opts);
 
   const removeResetStyles = injectRenderResetStyles();
@@ -1191,34 +1191,100 @@ async function addMarginContent(
 
   const staticCache = await preRenderStaticSlots(content, merged, scale);
 
+  // Pre-convert static slot canvases to data URLs (reused across pages via alias)
+  const staticDataUrls: Partial<Record<MarginSlot, string>> = {};
+  for (const slot of MARGIN_SLOTS) {
+    if (staticCache[slot]) {
+      staticDataUrls[slot] = staticCache[slot]!.toDataURL("image/png");
+    }
+  }
+
+  // Pre-render text border once (identical on every page)
+  let textBorderDataUrl: string | undefined;
+  if (content.textBorder) {
+    const tbCanvas = document.createElement("canvas");
+    tbCanvas.width = pageWidthPx;
+    tbCanvas.height = pageHeightPx;
+    const tbCtx = tbCanvas.getContext("2d");
+    if (tbCtx) {
+      const bm = resolveBorderMargin(content.textBorder, merged);
+      await drawTextBorderOnCanvas(
+        tbCtx,
+        content.textBorder,
+        pxPerMm,
+        Math.round(bm.left * pxPerMm),
+        Math.round(bm.top * pxPerMm),
+        Math.round((merged.pageWidth - bm.left - bm.right) * pxPerMm),
+        Math.round((merged.pageHeight - bm.top - bm.bottom) * pxPerMm),
+      );
+      textBorderDataUrl = tbCanvas.toDataURL("image/png");
+    }
+  }
+
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
 
-    const pageCanvas = document.createElement("canvas");
-    pageCanvas.width = pageWidthPx;
-    pageCanvas.height = pageHeightPx;
-    const ctx = pageCanvas.getContext("2d");
-    if (!ctx) continue;
+    // Render each margin slot as an individual small image
+    for (const slot of MARGIN_SLOTS) {
+      const val = content[slot];
+      if (!val) continue;
 
-    await drawMarginContentOnCanvas(
-      ctx,
-      content,
-      staticCache,
-      merged,
-      pxPerMm,
-      i,
-      totalPages,
-      scale,
-    );
+      const rect = getSlotRect(slot, merged);
+      let dataUrl: string;
+      let alias: string | undefined;
 
-    doc.addImage(
-      pageCanvas.toDataURL("image/png"),
-      "PNG",
-      0,
-      0,
-      merged.pageWidth,
-      merged.pageHeight,
-    );
+      if (typeof val === "function") {
+        const slotCanvas = await renderSlotToCanvas(
+          val(i, totalPages),
+          rect.width,
+          rect.height,
+          scale,
+        );
+        dataUrl = slotCanvas.toDataURL("image/png");
+      } else {
+        dataUrl = staticDataUrls[slot]!;
+        alias = `margin-${slot}`;
+      }
+
+      doc.addImage(
+        dataUrl,
+        "PNG",
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        alias,
+        "SLOW",
+      );
+    }
+
+    // Draw content border natively using jsPDF vector commands (zero image overhead)
+    if (content.contentBorder) {
+      const { color = "#000000", width = 0.3 } = content.contentBorder;
+      const bm = resolveBorderMargin(content.contentBorder, merged);
+      doc.setDrawColor(color);
+      doc.setLineWidth(width);
+      doc.rect(
+        bm.left,
+        bm.top,
+        merged.pageWidth - bm.left - bm.right,
+        merged.pageHeight - bm.top - bm.bottom,
+      );
+    }
+
+    // Add pre-rendered text border (reused across pages via alias)
+    if (textBorderDataUrl) {
+      doc.addImage(
+        textBorderDataUrl,
+        "PNG",
+        0,
+        0,
+        merged.pageWidth,
+        merged.pageHeight,
+        "text-border",
+        "SLOW",
+      );
+    }
   }
 
   return doc;
