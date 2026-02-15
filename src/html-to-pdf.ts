@@ -131,12 +131,30 @@ function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
 }
 
 /**
+ * Wait for all images inside a container to finish loading so that
+ * their bounding rects reflect the actual rendered dimensions.
+ */
+async function waitForImages(container: HTMLElement): Promise<void> {
+  const images = Array.from(container.querySelectorAll("img"));
+  await Promise.all(
+    images.map((img) => {
+      if (img.complete && img.naturalWidth > 0) return;
+      return new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      });
+    }),
+  );
+}
+
+/**
  * Expand a container's height to encompass any descendant content that
  * overflows with `overflow: visible`. Without this, html2canvas clips
  * the capture area to the element's own dimensions and overflowed
  * content is lost.
  */
-function expandToFitOverflow(container: HTMLElement): void {
+async function expandToFitOverflow(container: HTMLElement): Promise<void> {
+  await waitForImages(container);
   const containerRect = container.getBoundingClientRect();
   let maxBottom = containerRect.bottom;
   for (const el of container.querySelectorAll("*")) {
@@ -812,7 +830,7 @@ async function drawTextBorderOnCanvas(
   const fontSizePx = fontSize * pxPerMm;
   const gapPx = (tb.gap ?? fontSize * 0.5) * pxPerMm;
   const cornerGap = fontSizePx * 0.5;
-  const stripHeight = Math.ceil(fontSizePx * 1.5);
+  const stripHeight = Math.ceil(fontSizePx * 2);
 
   const isRtl = RTL_RE.test(text);
 
@@ -1008,7 +1026,7 @@ async function renderImagePDF(
   splitOversizedTables(clone, layout.pageContentPx);
   splitOversizedText(clone, layout.pageContentPx);
   insertPageBreakSpacers(clone, layout.pageContentPx);
-  expandToFitOverflow(clone);
+  await expandToFitOverflow(clone);
 
   try {
     const canvas = await html2canvas(clone, {
@@ -1123,7 +1141,7 @@ async function renderPageImages(
   splitOversizedTables(clone, layout.pageContentPx);
   splitOversizedText(clone, layout.pageContentPx);
   insertPageBreakSpacers(clone, layout.pageContentPx);
-  expandToFitOverflow(clone);
+  await expandToFitOverflow(clone);
 
   try {
     const canvas = await html2canvas(clone, {
