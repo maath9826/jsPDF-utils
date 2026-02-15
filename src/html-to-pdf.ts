@@ -1035,6 +1035,12 @@ async function renderImagePDF(
       format: [merged.pageWidth, merged.pageHeight],
     });
 
+    const pxPerMm = contentWidthPx / contentWidthMm;
+    const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
+    const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
+    const marginTopPx = Math.round(merged.margin.top * pxPerMm);
+    const marginLeftPx = Math.round(merged.margin.left * pxPerMm);
+
     for (let i = 0; i < totalPages; i++) {
       const sliceHeight = Math.min(
         contentHeightPx,
@@ -1042,14 +1048,14 @@ async function renderImagePDF(
       );
 
       const pageCanvas = document.createElement("canvas");
-      pageCanvas.width = contentWidthPx;
-      pageCanvas.height = sliceHeight;
+      pageCanvas.width = pageWidthPx;
+      pageCanvas.height = pageHeightPx;
 
       const ctx = pageCanvas.getContext("2d");
       if (!ctx) throw new Error("Could not get canvas context");
 
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, contentWidthPx, sliceHeight);
+      ctx.fillRect(0, 0, pageWidthPx, pageHeightPx);
 
       ctx.drawImage(
         canvas,
@@ -1057,8 +1063,8 @@ async function renderImagePDF(
         i * contentHeightPx,
         contentWidthPx,
         sliceHeight,
-        0,
-        0,
+        marginLeftPx,
+        marginTopPx,
         contentWidthPx,
         sliceHeight,
       );
@@ -1072,15 +1078,13 @@ async function renderImagePDF(
         imagePDF.addPage([merged.pageWidth, merged.pageHeight], orientation);
       }
 
-      const sliceHeightMm = (sliceHeight / contentWidthPx) * contentWidthMm;
-
       imagePDF.addImage(
         imageData,
         imageFormat,
-        merged.margin.left,
-        merged.margin.top,
-        contentWidthMm,
-        sliceHeightMm,
+        0,
+        0,
+        merged.pageWidth,
+        merged.pageHeight,
         undefined,
         "SLOW",
       );
