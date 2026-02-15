@@ -830,7 +830,7 @@ async function drawTextBorderOnCanvas(
   const fontSizePx = fontSize * pxPerMm;
   const gapPx = (tb.gap ?? fontSize * 0.5) * pxPerMm;
   const cornerGap = fontSizePx * 0.5;
-  const stripHeight = Math.ceil(fontSizePx * 2);
+  const stripHeight = Math.ceil(fontSizePx * 2.5);
 
   const isRtl = RTL_RE.test(text);
 
