@@ -131,6 +131,83 @@ function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
 }
 
 /**
+ * Expand a container's height to encompass any descendant content that
+ * overflows with `overflow: visible`. Without this, html2canvas clips
+ * the capture area to the element's own dimensions and overflowed
+ * content is lost.
+ */
+function expandToFitOverflow(container: HTMLElement): void {
+  const containerRect = container.getBoundingClientRect();
+  let maxBottom = containerRect.bottom;
+  for (const el of container.querySelectorAll("*")) {
+    const bottom = (el as HTMLElement).getBoundingClientRect().bottom;
+    if (bottom > maxBottom) maxBottom = bottom;
+  }
+  const requiredHeight = maxBottom - containerRect.top;
+  if (requiredHeight > container.offsetHeight) {
+    container.style.minHeight = requiredHeight + "px";
+  }
+}
+
+/**
+ * Downscale and compress images in a clone so that doc.html() doesn't embed
+ * them at their full intrinsic resolution (which can be 10-100× larger than
+ * the displayed size). Each image is redrawn at 2× its displayed size
+ * (for reasonable print quality) and converted to a compressed JPEG data URL.
+ */
+async function compressCloneImages(clone: HTMLElement): Promise<void> {
+  const images = Array.from(clone.querySelectorAll("img"));
+  if (images.length === 0) return;
+
+  await Promise.all(
+    images.map((img) => {
+      if (img.complete && img.naturalWidth > 0) return;
+      return new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      });
+    }),
+  );
+
+  const printScale = 2;
+  for (const img of images) {
+    if (!img.naturalWidth || !img.naturalHeight) continue;
+    if (img.src.startsWith("data:image/svg")) continue;
+
+    const displayW = img.offsetWidth || img.naturalWidth;
+    const displayH = img.offsetHeight || img.naturalHeight;
+
+    // Target: 2× display size, but never upscale beyond natural dimensions
+    const targetW = Math.min(displayW * printScale, img.naturalWidth);
+    const targetH = Math.min(displayH * printScale, img.naturalHeight);
+
+    // Skip if already at or below target size
+    if (
+      img.naturalWidth <= targetW &&
+      img.naturalHeight <= targetH &&
+      img.src.startsWith("data:")
+    )
+      continue;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
+
+    try {
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      // Preserve layout dimensions before replacing src
+      img.style.width = displayW + "px";
+      img.style.height = displayH + "px";
+      img.src = canvas.toDataURL("image/png");
+    } catch {
+      // Cross-origin images can't be drawn to canvas; skip
+    }
+  }
+}
+
+/**
  * Inject a global style reset to counteract CSS framework base styles
  * (e.g., Tailwind's `img { display: block }`) that break jsPDF/html2canvas
  * rendering. Returns a cleanup function that removes the injected style.
@@ -473,6 +550,7 @@ async function renderHTML(
   const { clone, layout, options, cleanup } = prepare(source, opts);
 
   try {
+    await compressCloneImages(clone);
     await new Promise<void>((resolve) => {
       doc.html(clone, {
         callback: () => resolve(),
@@ -930,6 +1008,7 @@ async function renderImagePDF(
   splitOversizedTables(clone, layout.pageContentPx);
   splitOversizedText(clone, layout.pageContentPx);
   insertPageBreakSpacers(clone, layout.pageContentPx);
+  expandToFitOverflow(clone);
 
   try {
     const canvas = await html2canvas(clone, {
@@ -1040,6 +1119,7 @@ async function renderPageImages(
   splitOversizedTables(clone, layout.pageContentPx);
   splitOversizedText(clone, layout.pageContentPx);
   insertPageBreakSpacers(clone, layout.pageContentPx);
+  expandToFitOverflow(clone);
 
   try {
     const canvas = await html2canvas(clone, {

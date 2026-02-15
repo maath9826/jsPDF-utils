@@ -74,6 +74,37 @@
           <td>88</td>
         </tr>
       </table>
+      <div style="font-weight: bold; position: relative; overflow: visible">
+        <div style="position: relative; min-height: 60px">
+          <div>التوقيع:</div>
+          <img
+            src="/images/AhmedMohammedMhoder.png"
+            style="
+              width: 224px;
+              height: auto;
+              max-height: 130px;
+              object-fit: contain;
+              position: absolute;
+              top: -30px;
+            "
+            alt="signature"
+          />
+        </div>
+        <div>اسم المستلم: احمد محمد مهودر</div>
+
+        <img
+          src="/images/Mark.png"
+          style="
+            width: 224px;
+            height: auto;
+            position: absolute;
+            right: 50%;
+            top: -30px;
+            transform: translateX(50%);
+          "
+          alt="signature"
+        />
+      </div>
     </div>
 
     <script type="module">
@@ -83,6 +114,75 @@
         previewPageImages,
       } from "./src/html-to-pdf.js";
       import { jsPDF } from "jspdf";
+      const RECEIPT_DATA = {
+        number: 111008194,
+        createdAt: "2026-01-20T12:37:14.692405Z",
+        year: 2025,
+        month: 12,
+        fromYear: 2025,
+        fromMonth: 1,
+        companyName: "مكتب بلسم الحياة العلمي لدعاية الادوية",
+        registrationNumber: "1111097450",
+        total: 2763172,
+        rnn: "000658139832",
+        resolvedAt: "2026-01-20T15:14:23.206Z",
+        subval: 2509200,
+        subvalType: "POS ONLINE",
+        subval2: 0,
+        subvalType2: "POS ONLINE",
+        forval1: 125460,
+        forval1Type: "POS ONLINE",
+        forval12: 0,
+        forval1Type2: "POS ONLINE",
+        forval2: 0,
+        forval2Type: "POS ONLINE",
+        forval22: 0,
+        forval2Type2: "POS ONLINE",
+        servicefees: 92213,
+        servicefeesType: "POS ONLINE",
+        servicefees2: 0,
+        servicefeesType2: "POS ONLINE",
+        inquiryfees: 0,
+        inquiryfeesType: "POS ONLINE",
+        inquiryfees2: 0,
+        inquiryfeesType2: "POS ONLINE",
+        yearlyfees: 25000,
+        yearlyfeesType: "POS ONLINE",
+        yearlyfees2: 0,
+        yearlyfeesType2: "POS ONLINE",
+        paymentfees: 10000,
+        savings: 1299,
+        savingsGate: "492 ايرادات عرضية",
+        savingsType: "POS ONLINE",
+        managerName: "احمد محمد مهودر",
+        managerSigniture: "AhmedMohammedMhoder.png",
+      };
+
+      export function convertDateFormat(dateString) {
+        if (!dateString) return null;
+
+        const date = new Date(dateString);
+        const options = {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        };
+
+        return date.toLocaleString("en-CA", options);
+      }
+
+      const pdfOptions = {
+        format: "a5",
+        margin: { top: 10, bottom: 10, left: 12, right: 12 },
+        marginContent: {
+          textBorder: {
+            text: `اسم المشروع ${RECEIPT_DATA.companyName} - وصل قبض - تاريخ الوصل ${convertDateFormat(RECEIPT_DATA.createdAt)} - مبلغ الوصل الكلي ${RECEIPT_DATA.total.toLocaleString()} - رقم الوصل ${RECEIPT_DATA.number} - `,
+            fontSize: 2,
+            margin: 6,
+            fontWeight: "bold",
+          },
+        },
+      };
 
       const marginContent = {
         top: (page, total) => {
@@ -106,16 +206,10 @@
           `;
           return el;
         },
-        contentBorder: { color: "#000000", width: 0.3 },
-        textBorder: {
-          text: "اسم المشروع شركة الندى - وصل قبض - تاريخ الوصل 2026-02-12 - مبلغ الوصل الكلي 10,000 - رقم الوصل 123 - ",
-          fontSize: 2,
-          color: "#000",
-          margin: 8,
-        },
+        textBorder: pdfOptions,
       };
 
-      const pdfOpts = { format: "a4", marginContent };
+      const pdfOpts = pdfOptions;
 
       const doc = new jsPDF(pdfOpts);
 
