@@ -647,7 +647,65 @@ function resolveMarginOverride(
 }
 
 /** Draw a repeated-text rectangle on a canvas. */
-function drawTextBorderOnCanvas(
+async function renderTextEdgeStrip(
+  text: string,
+  widthPx: number,
+  heightPx: number,
+  fontSizePx: number,
+  fontFamily: string,
+  fontWeight: string,
+  color: string,
+  gapPx: number,
+): Promise<HTMLCanvasElement> {
+  const wrapper = document.createElement("div");
+  Object.assign(wrapper.style, {
+    position: "fixed",
+    left: "-99999px",
+    top: "0",
+    width: `${widthPx}px`,
+    height: `${heightPx}px`,
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    fontSize: `${fontSizePx}px`,
+    fontFamily,
+    fontWeight,
+    color,
+    display: "flex",
+    alignItems: "center",
+    gap: `${gapPx}px`,
+  });
+
+  const measure = document.createElement("span");
+  measure.textContent = text;
+  Object.assign(measure.style, {
+    position: "absolute",
+    visibility: "hidden",
+    whiteSpace: "nowrap",
+    fontSize: `${fontSizePx}px`,
+    fontFamily,
+    fontWeight,
+  });
+  document.body.appendChild(measure);
+  const singleWidth = measure.offsetWidth;
+  measure.remove();
+
+  const reps = Math.ceil(widthPx / (singleWidth + gapPx)) + 2;
+  for (let i = 0; i < reps; i++) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    span.style.flexShrink = "0";
+    wrapper.appendChild(span);
+  }
+
+  document.body.appendChild(wrapper);
+  try {
+    return await html2canvas(wrapper, { scale: 1, backgroundColor: null });
+  } finally {
+    wrapper.remove();
+  }
+}
+
+async function drawTextBorderOnCanvas(
   ctx: CanvasRenderingContext2D,
   tb: TextBorder,
   pxPerMm: number,
@@ -655,7 +713,7 @@ function drawTextBorderOnCanvas(
   rectY: number,
   rectW: number,
   rectH: number,
-): void {
+): Promise<void> {
   const {
     text,
     color = "#000000",
@@ -665,62 +723,37 @@ function drawTextBorderOnCanvas(
   } = tb;
   const fontSizePx = fontSize * pxPerMm;
   const gapPx = (tb.gap ?? fontSize * 0.5) * pxPerMm;
-
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.font = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
-  ctx.textBaseline = "middle";
-
-  const textWidth = ctx.measureText(text).width;
-  const segmentWidth = textWidth + gapPx;
   const cornerGap = fontSizePx * 0.2;
+  const stripHeight = Math.ceil(fontSizePx * 1.5);
 
-  /** Draw repeated text along an edge, trimming the last segment at a
-   *  whole-character boundary instead of clipping letters in half. */
-  const drawEdge = (
-    start: number,
-    end: number,
-    draw: (pos: number, t: string) => void,
-  ) => {
-    for (let pos = start; pos < end; pos += segmentWidth) {
-      if (pos + textWidth <= end) {
-        draw(pos, text);
-      } else {
-        // Find longest prefix that fits without cutting a letter
-        for (let c = text.length - 1; c >= 1; c--) {
-          const sub = text.substring(0, c);
-          if (pos + ctx.measureText(sub).width <= end) {
-            draw(pos, sub);
-            break;
-          }
-        }
-      }
-    }
-  };
+  const hWidth = Math.round(rectW - cornerGap * 2);
+  const vWidth = Math.round(rectH - cornerGap * 2);
 
-  const hStart = rectX + cornerGap;
-  const hEnd = rectX + rectW - cornerGap;
+  const [hStrip, vStrip] = await Promise.all([
+    renderTextEdgeStrip(text, hWidth, stripHeight, fontSizePx, fontFamily, fontWeight, color, gapPx),
+    renderTextEdgeStrip(text, vWidth, stripHeight, fontSizePx, fontFamily, fontWeight, color, gapPx),
+  ]);
 
-  // Top edge (left to right)
-  drawEdge(hStart, hEnd, (pos, t) => ctx.fillText(t, pos, rectY));
+  const hOffsetY = Math.round(stripHeight / 2);
 
-  // Bottom edge (left to right)
-  drawEdge(hStart, hEnd, (pos, t) => ctx.fillText(t, pos, rectY + rectH));
+  // Top edge
+  ctx.drawImage(hStrip, rectX + cornerGap, rectY - hOffsetY);
+
+  // Bottom edge
+  ctx.drawImage(hStrip, rectX + cornerGap, rectY + rectH - hOffsetY);
 
   // Left edge (bottom to top)
   ctx.save();
-  ctx.translate(rectX, rectY + rectH);
+  ctx.translate(rectX, rectY + rectH - cornerGap);
   ctx.rotate(-Math.PI / 2);
-  drawEdge(cornerGap, rectH - cornerGap, (pos, t) => ctx.fillText(t, pos, 0));
+  ctx.drawImage(vStrip, 0, -hOffsetY);
   ctx.restore();
 
   // Right edge (top to bottom)
   ctx.save();
-  ctx.translate(rectX + rectW, rectY);
+  ctx.translate(rectX + rectW, rectY + cornerGap);
   ctx.rotate(Math.PI / 2);
-  drawEdge(cornerGap, rectH - cornerGap, (pos, t) => ctx.fillText(t, pos, 0));
-  ctx.restore();
-
+  ctx.drawImage(vStrip, 0, -hOffsetY);
   ctx.restore();
 }
 
@@ -789,7 +822,7 @@ async function drawMarginContentOnCanvas(
 
   if (content.textBorder) {
     const bm = resolveBorderMargin(content.textBorder, opts);
-    drawTextBorderOnCanvas(
+    await drawTextBorderOnCanvas(
       ctx,
       content.textBorder,
       pxPerMm,
