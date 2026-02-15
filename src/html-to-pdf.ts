@@ -520,6 +520,8 @@ export interface TextBorder {
   fontSize?: number;
   /** Font family (default: "Arial, sans-serif") */
   fontFamily?: string;
+  /** Font weight (default: "normal") */
+  fontWeight?: string;
   /** Gap between repetitions in mm (default: fontSize * 0.5) */
   gap?: number;
   /** Distance in mm from the page edge to the text border (default: uses page margins). */
@@ -659,13 +661,14 @@ function drawTextBorderOnCanvas(
     color = "#000000",
     fontSize = 2.5,
     fontFamily = "Arial, sans-serif",
+    fontWeight = "normal",
   } = tb;
   const fontSizePx = fontSize * pxPerMm;
   const gapPx = (tb.gap ?? fontSize * 0.5) * pxPerMm;
 
   ctx.save();
   ctx.fillStyle = color;
-  ctx.font = `${fontSizePx}px ${fontFamily}`;
+  ctx.font = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
   ctx.textBaseline = "middle";
 
   const textWidth = ctx.measureText(text).width;
