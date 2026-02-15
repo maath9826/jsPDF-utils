@@ -668,69 +668,54 @@ function drawTextBorderOnCanvas(
   ctx.font = `${fontSizePx}px ${fontFamily}`;
   ctx.textBaseline = "middle";
 
-  const segmentWidth = ctx.measureText(text).width + gapPx;
-  const cornerGap = fontSizePx * 0.5;
+  const textWidth = ctx.measureText(text).width;
+  const segmentWidth = textWidth + gapPx;
+  const cornerGap = fontSizePx * 0.2;
+
+  /** Draw repeated text along an edge, trimming the last segment at a
+   *  whole-character boundary instead of clipping letters in half. */
+  const drawEdge = (
+    start: number,
+    end: number,
+    draw: (pos: number, t: string) => void,
+  ) => {
+    for (let pos = start; pos < end; pos += segmentWidth) {
+      if (pos + textWidth <= end) {
+        draw(pos, text);
+      } else {
+        // Find longest prefix that fits without cutting a letter
+        for (let c = text.length - 1; c >= 1; c--) {
+          const sub = text.substring(0, c);
+          if (pos + ctx.measureText(sub).width <= end) {
+            draw(pos, sub);
+            break;
+          }
+        }
+      }
+    }
+  };
+
+  const hStart = rectX + cornerGap;
+  const hEnd = rectX + rectW - cornerGap;
 
   // Top edge (left to right)
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(
-    rectX + cornerGap,
-    rectY - fontSizePx,
-    rectW - cornerGap * 2,
-    fontSizePx * 2,
-  );
-  ctx.clip();
-  for (
-    let x = rectX + cornerGap;
-    x < rectX + rectW - cornerGap;
-    x += segmentWidth
-  ) {
-    ctx.fillText(text, x, rectY);
-  }
-  ctx.restore();
+  drawEdge(hStart, hEnd, (pos, t) => ctx.fillText(t, pos, rectY));
 
   // Bottom edge (left to right)
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(
-    rectX + cornerGap,
-    rectY + rectH - fontSizePx,
-    rectW - cornerGap * 2,
-    fontSizePx * 2,
-  );
-  ctx.clip();
-  for (
-    let x = rectX + cornerGap;
-    x < rectX + rectW - cornerGap;
-    x += segmentWidth
-  ) {
-    ctx.fillText(text, x, rectY + rectH);
-  }
-  ctx.restore();
+  drawEdge(hStart, hEnd, (pos, t) => ctx.fillText(t, pos, rectY + rectH));
 
   // Left edge (bottom to top)
   ctx.save();
   ctx.translate(rectX, rectY + rectH);
   ctx.rotate(-Math.PI / 2);
-  ctx.beginPath();
-  ctx.rect(cornerGap, -fontSizePx, rectH - cornerGap * 2, fontSizePx * 2);
-  ctx.clip();
-  for (let y = cornerGap; y < rectH - cornerGap; y += segmentWidth) {
-    ctx.fillText(text, y, 0);
-  }
+  drawEdge(cornerGap, rectH - cornerGap, (pos, t) => ctx.fillText(t, pos, 0));
   ctx.restore();
 
   // Right edge (top to bottom)
   ctx.save();
   ctx.translate(rectX + rectW, rectY);
   ctx.rotate(Math.PI / 2);
-  ctx.beginPath();
-  ctx.rect(cornerGap, -fontSizePx, rectH - cornerGap * 2, fontSizePx * 2);
-  ctx.clip();
-  for (let y = cornerGap; y < rectH - cornerGap; y += segmentWidth) {
-    ctx.fillText(text, y, 0);
-  }
+  drawEdge(cornerGap, rectH - cornerGap, (pos, t) => ctx.fillText(t, pos, 0));
   ctx.restore();
 
   ctx.restore();
