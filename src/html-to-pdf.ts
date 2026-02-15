@@ -157,7 +157,7 @@ async function expandToFitOverflow(container: HTMLElement): Promise<void> {
   await waitForImages(container);
   const containerRect = container.getBoundingClientRect();
   let maxBottom = containerRect.bottom;
-  for (const el of container.querySelectorAll("*")) {
+  for (const el of Array.from(container.querySelectorAll("*"))) {
     const bottom = (el as HTMLElement).getBoundingClientRect().bottom;
     if (bottom > maxBottom) maxBottom = bottom;
   }
@@ -243,10 +243,10 @@ function injectRenderResetStyles(): () => void {
  * inline CSS so doc.html()'s renderer picks them up.
  */
 function normalizeTableAttributes(container: HTMLElement): void {
-  for (const table of container.querySelectorAll("table")) {
+  for (const table of Array.from(container.querySelectorAll("table"))) {
     const cellpadding = table.getAttribute("cellpadding");
     if (cellpadding) {
-      for (const cell of table.querySelectorAll("th, td")) {
+      for (const cell of Array.from(table.querySelectorAll("th, td"))) {
         if (!(cell as HTMLElement).style.padding) {
           (cell as HTMLElement).style.padding = cellpadding + "px";
         }
@@ -1262,11 +1262,11 @@ async function previewPageImages(
       maxWidth: "100%",
       height: "auto",
       boxSizing: "border-box",
-      display: "block",
       border: "1px solid #bbb",
       boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
       marginBottom: "16px",
     });
+    img.style.setProperty("display", "inline", "important");
     container.appendChild(img);
   }
 }
@@ -1288,6 +1288,7 @@ async function addMarginContent(
   const totalPages = doc.getNumberOfPages();
   const scale = 4;
   const pxPerMm = scale * (96 / 25.4);
+  const removeResetStyles = injectRenderResetStyles();
   const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
   const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
 
@@ -1389,6 +1390,7 @@ async function addMarginContent(
     }
   }
 
+  removeResetStyles();
   return doc;
 }
 
