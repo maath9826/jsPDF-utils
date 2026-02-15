@@ -398,8 +398,7 @@ function insertPageBreakSpacers(
     const child = container.children[i] as HTMLElement;
     const childTop = child.offsetTop;
     const childBottom = childTop + child.offsetHeight;
-    const pageEnd =
-      (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
+    const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
     if (childBottom > pageEnd) {
       const remainingSpace = pageEnd - childTop;
@@ -507,7 +506,9 @@ export interface ContentBorder {
   /** Line width in mm (default: 0.3) */
   width?: number;
   /** Distance in mm from the page edge to the border (default: uses page margins). */
-  margin?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  margin?:
+    | number
+    | { top?: number; right?: number; bottom?: number; left?: number };
 }
 
 export interface TextBorder {
@@ -522,7 +523,9 @@ export interface TextBorder {
   /** Gap between repetitions in mm (default: fontSize * 0.5) */
   gap?: number;
   /** Distance in mm from the page edge to the text border (default: uses page margins). */
-  margin?: number | { top?: number; right?: number; bottom?: number; left?: number };
+  margin?:
+    | number
+    | { top?: number; right?: number; bottom?: number; left?: number };
 }
 
 export interface MarginContentInput {
@@ -623,7 +626,10 @@ async function preRenderStaticSlots(
 
 /** Resolve a margin override shared by ContentBorder and TextBorder. */
 function resolveMarginOverride(
-  m: undefined | number | { top?: number; right?: number; bottom?: number; left?: number },
+  m:
+    | undefined
+    | number
+    | { top?: number; right?: number; bottom?: number; left?: number },
   opts: PageOptions,
 ): Margin {
   if (m == null) return opts.margin;
@@ -663,13 +669,23 @@ function drawTextBorderOnCanvas(
   ctx.textBaseline = "middle";
 
   const segmentWidth = ctx.measureText(text).width + gapPx;
+  const cornerGap = fontSizePx * 0.5;
 
   // Top edge (left to right)
   ctx.save();
   ctx.beginPath();
-  ctx.rect(rectX, rectY - fontSizePx, rectW, fontSizePx * 2);
+  ctx.rect(
+    rectX + cornerGap,
+    rectY - fontSizePx,
+    rectW - cornerGap * 2,
+    fontSizePx * 2,
+  );
   ctx.clip();
-  for (let x = rectX; x < rectX + rectW; x += segmentWidth) {
+  for (
+    let x = rectX + cornerGap;
+    x < rectX + rectW - cornerGap;
+    x += segmentWidth
+  ) {
     ctx.fillText(text, x, rectY);
   }
   ctx.restore();
@@ -677,9 +693,18 @@ function drawTextBorderOnCanvas(
   // Bottom edge (left to right)
   ctx.save();
   ctx.beginPath();
-  ctx.rect(rectX, rectY + rectH - fontSizePx, rectW, fontSizePx * 2);
+  ctx.rect(
+    rectX + cornerGap,
+    rectY + rectH - fontSizePx,
+    rectW - cornerGap * 2,
+    fontSizePx * 2,
+  );
   ctx.clip();
-  for (let x = rectX; x < rectX + rectW; x += segmentWidth) {
+  for (
+    let x = rectX + cornerGap;
+    x < rectX + rectW - cornerGap;
+    x += segmentWidth
+  ) {
     ctx.fillText(text, x, rectY + rectH);
   }
   ctx.restore();
@@ -689,9 +714,9 @@ function drawTextBorderOnCanvas(
   ctx.translate(rectX, rectY + rectH);
   ctx.rotate(-Math.PI / 2);
   ctx.beginPath();
-  ctx.rect(0, -fontSizePx, rectH, fontSizePx * 2);
+  ctx.rect(cornerGap, -fontSizePx, rectH - cornerGap * 2, fontSizePx * 2);
   ctx.clip();
-  for (let y = 0; y < rectH; y += segmentWidth) {
+  for (let y = cornerGap; y < rectH - cornerGap; y += segmentWidth) {
     ctx.fillText(text, y, 0);
   }
   ctx.restore();
@@ -701,9 +726,9 @@ function drawTextBorderOnCanvas(
   ctx.translate(rectX + rectW, rectY);
   ctx.rotate(Math.PI / 2);
   ctx.beginPath();
-  ctx.rect(0, -fontSizePx, rectH, fontSizePx * 2);
+  ctx.rect(cornerGap, -fontSizePx, rectH - cornerGap * 2, fontSizePx * 2);
   ctx.clip();
-  for (let y = 0; y < rectH; y += segmentWidth) {
+  for (let y = cornerGap; y < rectH - cornerGap; y += segmentWidth) {
     ctx.fillText(text, y, 0);
   }
   ctx.restore();
