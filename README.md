@@ -36,13 +36,14 @@ import { generatePDF } from "jspdf-utils";
 const target = document.getElementById("print-section");
 if (!target) throw new Error("Missing #print-section");
 
-const doc = new jsPDF({ unit: "mm", format: "a4" });
+const doc = new jsPDF({ unit: "mm" });
 
 // Optional for Arabic/RTL text:
 // doc.addFont("/fonts/arial.ttf", "arial", "normal");
 // doc.addFont("/fonts/arial-bold.ttf", "arial", "bold");
 
 await generatePDF(doc, target, {
+  format: "a4",
   margin: { top: 20, right: 20, bottom: 20, left: 20 },
   forcedPageCount: 1,
 });
@@ -91,6 +92,13 @@ await previewImages(target, preview, {
 - `pageWidth?: number` (default comes from `format`)
 - `pageHeight?: number` (default comes from `format`)
 - `margin?: number | { top?: number; right?: number; bottom?: number; left?: number }`
+
+Important:
+
+- `generatePDF`, `generateImagePDF`, `generateImages`, and `previewImages` use
+  page sizing from their `opts` (`format` / `pageWidth` / `pageHeight`).
+- Do not rely on `new jsPDF({ format: ... })` to control layout in
+  `generatePDF`; pass `format` in `opts` instead.
 
 ### `ImagePDFOptions`
 
