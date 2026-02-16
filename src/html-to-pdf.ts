@@ -560,7 +560,7 @@ function prepare(
 /**
  * Render an HTML element to PDF using doc.html().
  */
-async function renderHTML(
+async function generatePDF(
   doc: jsPDF,
   source: HTMLElement,
   opts: Partial<PageOptions> & Pick<ImagePDFOptions, "marginContent"> = {},
@@ -1009,7 +1009,7 @@ async function drawMarginContentOnCanvas(
  * Render an HTML element as an image-based PDF. Each page is a rasterized
  * screenshot — no selectable or extractable text in the output.
  */
-async function renderImagePDF(
+async function generateImagePDF(
   source: HTMLElement,
   opts: Partial<PageOptions> & ImagePDFOptions = {},
 ): Promise<jsPDF> {
@@ -1124,7 +1124,7 @@ async function renderImagePDF(
  * Each image represents a full page with margins, matching the
  * visual output of renderImagePDF.
  */
-async function renderPageImages(
+async function generateImages(
   source: HTMLElement,
   opts: Partial<PageOptions> & ImagePDFOptions = {},
 ): Promise<string[]> {
@@ -1235,13 +1235,13 @@ async function renderPageImages(
  * Render an HTML element as page images and inject them into a scrollable
  * container. Each image is sized to match the page format dimensions.
  */
-async function previewPageImages(
+async function previewImages(
   source: HTMLElement,
   container: HTMLElement,
   opts: Partial<PageOptions> & ImagePDFOptions = {},
 ): Promise<void> {
   const merged = resolveOptions(opts);
-  const images = await renderPageImages(source, opts);
+  const images = await generateImages(source, opts);
 
   container.innerHTML = "";
   Object.assign(container.style, {
@@ -1397,16 +1397,8 @@ async function addMarginContent(
 export {
   PAGE_SIZES,
   PAGE_MARGINS,
-  computeLayout,
-  createPrintClone,
-  normalizeTableAttributes,
-  splitOversizedTables,
-  splitOversizedText,
-  insertPageBreakSpacers,
-  prepare,
-  renderHTML,
-  renderImagePDF,
-  renderPageImages,
-  previewPageImages,
-  addMarginContent,
+  generatePDF,
+  generateImagePDF,
+  generateImages,
+  previewImages,
 };
