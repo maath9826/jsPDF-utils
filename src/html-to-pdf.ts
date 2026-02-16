@@ -92,7 +92,10 @@ function createUniformMargin(value: number): Margin {
 }
 
 /** Resolve a MarginInput to a full Margin, falling back to the default for the format. */
-function resolveMargin(input: MarginInput | undefined, format: PageFormat): Margin {
+function resolveMargin(
+  input: MarginInput | undefined,
+  format: PageFormat,
+): Margin {
   const fallback = createUniformMargin(PAGE_MARGINS[format]);
   if (input == null) return fallback;
   if (typeof input === "number") return createUniformMargin(input);
@@ -1141,7 +1144,7 @@ async function generateImagePDF(
   source: HTMLElement,
   opts: PageOptionsInput & ImagePDFOptions = {},
 ): Promise<jsPDF> {
-  const { imageFormat = "JPEG", imageQuality = 0.7, scale = 2 } = opts;
+  const { imageFormat = "JPEG", imageQuality = 0.7, scale = 3 } = opts;
   const merged = resolveOptions(opts);
   const { clone, cleanup } = await prepareImageRenderClone(source, merged);
 
@@ -1164,7 +1167,11 @@ async function generateImagePDF(
     });
 
     for (let i = 0; i < totalPages; i++) {
-      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(canvas, i, dims);
+      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(
+        canvas,
+        i,
+        dims,
+      );
 
       const imageData = pageCanvas.toDataURL(
         `image/${imageFormat.toLowerCase()}`,
@@ -1226,7 +1233,11 @@ async function generateImages(
       : {};
 
     for (let i = 0; i < totalPages; i++) {
-      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(canvas, i, dims);
+      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(
+        canvas,
+        i,
+        dims,
+      );
 
       if (marginContent) {
         await drawMarginContentOnCanvas(
