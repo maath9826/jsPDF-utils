@@ -594,7 +594,8 @@ function prepare(
 async function generatePDF(
   doc: jsPDF,
   source: HTMLElement,
-  opts: PageOptionsInput & Pick<ImagePDFOptions, "marginContent"> = {},
+  opts: PageOptionsInput &
+    Pick<ImagePDFOptions, "marginContent" | "forcedPageCount"> = {},
 ): Promise<jsPDF> {
   const { clone, layout, options, cleanup } = prepare(source, opts);
 
@@ -617,8 +618,14 @@ async function generatePDF(
     cleanup();
   }
 
+  if (opts.forcedPageCount) {
+    trimDocumentToForcedPageCount(doc, opts.forcedPageCount);
+  }
+
   if (opts.marginContent) {
+    const originalPageOpLengths = snapshotPageStreamLengths(doc);
     await addMarginContent(doc, opts.marginContent, opts);
+    moveAddedPageOpsToBackground(doc, originalPageOpLengths);
   }
 
   return doc;
@@ -673,6 +680,42 @@ export interface ImagePDFOptions {
   imageQuality?: number;
   scale?: number;
   marginContent?: MarginContentInput;
+  /**
+   * Force output to the first N pages only.
+   * Example: 1 means only page 1 is generated/exported.
+   */
+  forcedPageCount?: number;
+}
+
+function normalizeForcedPageCount(
+  forcedPageCount: number | undefined,
+): number | undefined {
+  if (forcedPageCount == null || !Number.isFinite(forcedPageCount)) return;
+  const normalized = Math.floor(forcedPageCount);
+  if (normalized < 1) return;
+  return normalized;
+}
+
+function resolveTotalPages(
+  actualTotalPages: number,
+  forcedPageCount: number | undefined,
+): number {
+  const forced = normalizeForcedPageCount(forcedPageCount);
+  if (!forced) return actualTotalPages;
+  return Math.min(actualTotalPages, forced);
+}
+
+function trimDocumentToForcedPageCount(
+  doc: jsPDF,
+  forcedPageCount: number | undefined,
+): void {
+  const forced = normalizeForcedPageCount(forcedPageCount);
+  if (!forced) return;
+
+  const currentTotal = doc.getNumberOfPages();
+  for (let page = currentTotal; page > forced; page--) {
+    doc.deletePage(page);
+  }
 }
 
 function getSlotRect(
@@ -730,6 +773,47 @@ async function renderSlotToCanvas(
 }
 
 const MARGIN_SLOTS: MarginSlot[] = ["top", "right", "bottom", "left"];
+
+/** Capture current page content-stream lengths so newly appended ops can be reordered. */
+function snapshotPageStreamLengths(doc: jsPDF): number[] {
+  const pages = (doc as unknown as { internal?: { pages?: unknown[] } })
+    .internal?.pages;
+  if (!Array.isArray(pages)) return [];
+
+  const totalPages = doc.getNumberOfPages();
+  const lengths: number[] = [];
+  for (let page = 1; page <= totalPages; page++) {
+    const stream = pages[page];
+    lengths.push(Array.isArray(stream) ? stream.length : 0);
+  }
+  return lengths;
+}
+
+/**
+ * Reorder newly appended page operations so they render beneath existing content.
+ * jsPDF paints in command order: earlier ops are visually behind later ops.
+ */
+function moveAddedPageOpsToBackground(
+  doc: jsPDF,
+  originalLengths: number[],
+): void {
+  const pages = (doc as unknown as { internal?: { pages?: unknown[] } })
+    .internal?.pages;
+  if (!Array.isArray(pages)) return;
+
+  const totalPages = Math.min(doc.getNumberOfPages(), originalLengths.length);
+  for (let page = 1; page <= totalPages; page++) {
+    const stream = pages[page];
+    if (!Array.isArray(stream)) continue;
+
+    const cutoff = originalLengths[page - 1] ?? stream.length;
+    if (cutoff < 0 || cutoff >= stream.length) continue;
+
+    const existingOps = stream.slice(0, cutoff);
+    const addedOps = stream.slice(cutoff);
+    pages[page] = [...addedOps, ...existingOps];
+  }
+}
 
 /** Pre-render static (non-function) margin content once for reuse across pages. */
 async function preRenderStaticSlots(
@@ -1078,7 +1162,11 @@ function createPageSliceCanvas(
   sourceCanvas: HTMLCanvasElement,
   pageIndex: number,
   dims: PageDimensions,
-): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+): {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  sliceHeight: number;
+} {
   const sliceHeight = Math.min(
     dims.contentHeightPx,
     sourceCanvas.height - pageIndex * dims.contentHeightPx,
@@ -1094,6 +1182,17 @@ function createPageSliceCanvas(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, dims.pageWidthPx, dims.pageHeightPx);
 
+  return { canvas: pageCanvas, ctx, sliceHeight };
+}
+
+/** Draw one page's content slice into the prepared page canvas. */
+function drawContentSliceOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  sourceCanvas: HTMLCanvasElement,
+  pageIndex: number,
+  dims: PageDimensions,
+  sliceHeight: number,
+): void {
   ctx.drawImage(
     sourceCanvas,
     0,
@@ -1105,8 +1204,6 @@ function createPageSliceCanvas(
     dims.contentWidthPx,
     sliceHeight,
   );
-
-  return { canvas: pageCanvas, ctx };
 }
 
 /** Shared setup for image-based rendering (generateImagePDF & generateImages). */
@@ -1151,14 +1248,22 @@ async function generateImagePDF(
   try {
     const canvas = await html2canvas(clone, {
       scale,
-      backgroundColor: "#ffffff",
+      backgroundColor: null,
     });
 
     const { jsPDF: JsPDF } = await import("jspdf");
 
     const dims = computePageDimensions(canvas, merged);
-    const totalPages = Math.ceil(canvas.height / dims.contentHeightPx);
+    const actualTotalPages = Math.ceil(canvas.height / dims.contentHeightPx);
+    const totalPages = resolveTotalPages(
+      actualTotalPages,
+      opts.forcedPageCount,
+    );
     const orientation = merged.pageWidth > merged.pageHeight ? "l" : "p";
+    const { marginContent } = opts;
+    const staticCache = marginContent
+      ? await preRenderStaticSlots(marginContent, merged, scale)
+      : {};
 
     const imagePDF = new JsPDF({
       orientation,
@@ -1167,11 +1272,26 @@ async function generateImagePDF(
     });
 
     for (let i = 0; i < totalPages; i++) {
-      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(
-        canvas,
-        i,
-        dims,
-      );
+      const {
+        canvas: pageCanvas,
+        ctx,
+        sliceHeight,
+      } = createPageSliceCanvas(canvas, i, dims);
+
+      if (marginContent) {
+        await drawMarginContentOnCanvas(
+          ctx,
+          marginContent,
+          staticCache,
+          merged,
+          dims.pxPerMm,
+          i + 1,
+          totalPages,
+          scale,
+        );
+      }
+
+      drawContentSliceOnCanvas(ctx, canvas, i, dims, sliceHeight);
 
       const imageData = pageCanvas.toDataURL(
         `image/${imageFormat.toLowerCase()}`,
@@ -1192,10 +1312,6 @@ async function generateImagePDF(
         undefined,
         "SLOW",
       );
-    }
-
-    if (opts.marginContent) {
-      await addMarginContent(imagePDF, opts.marginContent, opts);
     }
 
     return imagePDF;
@@ -1220,11 +1336,15 @@ async function generateImages(
   try {
     const canvas = await html2canvas(clone, {
       scale,
-      backgroundColor: "#ffffff",
+      backgroundColor: null,
     });
 
     const dims = computePageDimensions(canvas, merged);
-    const totalPages = Math.ceil(canvas.height / dims.contentHeightPx);
+    const actualTotalPages = Math.ceil(canvas.height / dims.contentHeightPx);
+    const totalPages = resolveTotalPages(
+      actualTotalPages,
+      opts.forcedPageCount,
+    );
     const images: string[] = [];
 
     const { marginContent } = opts;
@@ -1233,11 +1353,11 @@ async function generateImages(
       : {};
 
     for (let i = 0; i < totalPages; i++) {
-      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(
-        canvas,
-        i,
-        dims,
-      );
+      const {
+        canvas: pageCanvas,
+        ctx,
+        sliceHeight,
+      } = createPageSliceCanvas(canvas, i, dims);
 
       if (marginContent) {
         await drawMarginContentOnCanvas(
@@ -1251,6 +1371,8 @@ async function generateImages(
           scale,
         );
       }
+
+      drawContentSliceOnCanvas(ctx, canvas, i, dims, sliceHeight);
 
       images.push(
         pageCanvas.toDataURL(
@@ -1280,6 +1402,8 @@ async function previewImages(
 
   container.innerHTML = "";
   Object.assign(container.style, {
+    display: "flex",
+    flexDirection: "column",
     direction: "ltr",
     width: "fit-content",
     height: merged.pageHeight + "mm",
