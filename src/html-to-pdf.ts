@@ -5,8 +5,8 @@
  * via jsPDF's doc.html() renderer.
  */
 
+import html2canvas from "html2canvas-pro";
 import type { jsPDF } from "jspdf";
-import html2canvas from "html2canvas";
 
 export interface Margin {
   top: number;

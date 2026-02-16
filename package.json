@@ -34,7 +34,7 @@
   },
   "homepage": "https://github.com/maath9826/jsPDF-utils#readme",
   "peerDependencies": {
-    "html2canvas": "^1.4.1",
+    "html2canvas-pro": "^1.6.7",
     "jspdf": ">=2.5.0"
   },
   "scripts": {
@@ -45,7 +45,7 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "html2canvas": "^1.4.1",
+    "html2canvas-pro": "^1.6.7",
     "jspdf": "^4.1.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
