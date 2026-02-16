@@ -1,12 +1,12 @@
 # jsPDF Utils
 
 Utilities for rendering HTML into paginated PDF output with `jsPDF` and
-`html2canvas`.
+`html2canvas-pro`.
 
 ## Installation
 
 ```bash
-npm install jspdf-utils jspdf html2canvas
+npm install jspdf-utils jspdf html2canvas-pro
 ```
 
 ## Exported API
