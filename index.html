@@ -109,9 +109,9 @@
 
     <script type="module">
       import {
-        renderImagePDF,
-        renderHTML,
-        previewPageImages,
+        generateImagePDF,
+        generatePDF,
+        previewImages,
       } from "./src/html-to-pdf.js";
       import { jsPDF } from "jspdf";
       const RECEIPT_DATA = {
@@ -225,7 +225,7 @@
         const target = document.getElementById("print-section");
         if (!target) return;
 
-        const imagePDF = await renderHTML(doc, target, pdfOpts);
+        const imagePDF = await generatePDF(doc, target, pdfOpts);
         imagePDF.save("doc-html-renderer-test.pdf");
       });
 
@@ -233,7 +233,7 @@
         const target = document.getElementById("print-section");
         if (!target) return;
 
-        const imagePDF = await renderImagePDF(target, pdfOpts);
+        const imagePDF = await generateImagePDF(target, pdfOpts);
         imagePDF.save("doc-html-renderer-test.pdf");
       });
 
@@ -242,7 +242,7 @@
         const target = document.getElementById("print-section");
         if (!target) return;
 
-        await previewPageImages(target, previewContainer, pdfOpts);
+        await previewImages(target, previewContainer, pdfOpts);
       });
     </script>
   </body>

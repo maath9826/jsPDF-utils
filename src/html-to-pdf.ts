@@ -27,6 +27,10 @@ export type PageFormat =
   | "legal"
   | "tabloid";
 
+export type MarginInput =
+  | number
+  | { top?: number; right?: number; bottom?: number; left?: number };
+
 export interface PageOptions {
   unit: string;
   format: PageFormat;
@@ -34,6 +38,11 @@ export interface PageOptions {
   pageHeight: number;
   margin: Margin;
 }
+
+/** Input variant of PageOptions where margin accepts a number or partial sides. */
+export type PageOptionsInput = Partial<Omit<PageOptions, "margin">> & {
+  margin?: MarginInput;
+};
 
 /** Standard page dimensions in mm (portrait). */
 const PAGE_SIZES: Record<PageFormat, [number, number]> = {
@@ -77,27 +86,35 @@ export interface PrepareResult {
   cleanup: () => void;
 }
 
+/** Create a Margin with the same value on all four sides. */
+function createUniformMargin(value: number): Margin {
+  return { top: value, right: value, bottom: value, left: value };
+}
+
+/** Resolve a MarginInput to a full Margin, falling back to the default for the format. */
+function resolveMargin(input: MarginInput | undefined, format: PageFormat): Margin {
+  const fallback = createUniformMargin(PAGE_MARGINS[format]);
+  if (input == null) return fallback;
+  if (typeof input === "number") return createUniformMargin(input);
+  return {
+    top: input.top ?? fallback.top,
+    right: input.right ?? fallback.right,
+    bottom: input.bottom ?? fallback.bottom,
+    left: input.left ?? fallback.left,
+  };
+}
+
 /** Resolve options: dimensions inferred from format unless explicitly provided. */
-function resolveOptions(opts: Partial<PageOptions> = {}): PageOptions {
+function resolveOptions(opts: PageOptionsInput = {}): PageOptions {
   const format = opts.format ?? "a4";
   const [defaultWidth, defaultHeight] = PAGE_SIZES[format];
-  const pageWidth = opts.pageWidth ?? defaultWidth;
-  const pageHeight = opts.pageHeight ?? defaultHeight;
-
-  const defaultMargin = PAGE_MARGINS[format];
-  const defaultMarginObj: Margin = {
-    top: defaultMargin,
-    right: defaultMargin,
-    bottom: defaultMargin,
-    left: defaultMargin,
-  };
 
   return {
     unit: opts.unit ?? "mm",
     format,
-    pageWidth,
-    pageHeight,
-    margin: { ...defaultMarginObj, ...opts.margin },
+    pageWidth: opts.pageWidth ?? defaultWidth,
+    pageHeight: opts.pageHeight ?? defaultHeight,
+    margin: resolveMargin(opts.margin, format),
   };
 }
 
@@ -177,15 +194,7 @@ async function compressCloneImages(clone: HTMLElement): Promise<void> {
   const images = Array.from(clone.querySelectorAll("img"));
   if (images.length === 0) return;
 
-  await Promise.all(
-    images.map((img) => {
-      if (img.complete && img.naturalWidth > 0) return;
-      return new Promise<void>((resolve) => {
-        img.onload = () => resolve();
-        img.onerror = () => resolve();
-      });
-    }),
-  );
+  await waitForImages(clone);
 
   const printScale = 2;
   for (const img of images) {
@@ -271,13 +280,10 @@ function splitOversizedTables(
   )) {
     if (table.offsetHeight <= pageContentPx) continue;
 
-    const rows = Array.from(table.rows);
-    if (rows.length === 0) continue;
+    const parsed = parseTableStructure(table);
+    if (!parsed) continue;
 
-    const hasHeader = rows[0].querySelector("th") !== null;
-    const headerRow = hasHeader ? rows[0] : null;
-    const bodyRows = hasHeader ? rows.slice(1) : rows;
-    const headerHeight = headerRow ? headerRow.offsetHeight : 0;
+    const { headerRow, bodyRows, headerHeight } = parsed;
     const maxRowsHeight = pageContentPx - headerHeight - 2;
 
     const groups: HTMLTableRowElement[][] = [];
@@ -306,6 +312,66 @@ function splitOversizedTables(
   }
 }
 
+/** Create a hidden off-screen element for height measurement. */
+function createMeasureElement(
+  tag: string,
+  styleAttr: string,
+  width: string,
+  container: HTMLElement,
+): HTMLElement {
+  const measure = document.createElement(tag);
+  measure.setAttribute("style", styleAttr);
+  Object.assign(measure.style, {
+    position: "absolute",
+    visibility: "hidden",
+    width,
+  });
+  container.appendChild(measure);
+  return measure;
+}
+
+/** Binary-search for the maximum word count (from startIndex) that fits within maxHeight. */
+function binarySearchWordFit(
+  measure: HTMLElement,
+  words: string[],
+  maxHeight: number,
+  startIndex: number,
+): number {
+  let lo = startIndex + 1;
+  let hi = words.length;
+
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    measure.textContent = words.slice(startIndex, mid).join(" ");
+    if (measure.offsetHeight <= maxHeight) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  return lo;
+}
+
+/** Parse a table's header/body row structure. Returns null if the table has no rows. */
+function parseTableStructure(table: HTMLTableElement): {
+  rows: HTMLTableRowElement[];
+  hasHeader: boolean;
+  headerRow: HTMLTableRowElement | null;
+  bodyRows: HTMLTableRowElement[];
+  headerHeight: number;
+} | null {
+  const rows = Array.from(table.rows);
+  if (rows.length === 0) return null;
+
+  const hasHeader = rows[0].querySelector("th") !== null;
+  const headerRow = hasHeader ? rows[0] : null;
+  const bodyRows = hasHeader ? rows.slice(1) : rows;
+  const headerHeight = headerRow ? headerRow.offsetHeight : 0;
+
+  return { rows, hasHeader, headerRow, bodyRows, headerHeight };
+}
+
 /**
  * Split direct-child elements (non-table) that are taller than one page
  * into word-boundary chunks using binary search.
@@ -324,31 +390,13 @@ function splitOversizedText(
     const width = getComputedStyle(htmlEl).width;
     const words = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
 
-    const measure = document.createElement(tag);
-    measure.setAttribute("style", styleAttr);
-    Object.assign(measure.style, {
-      position: "absolute",
-      visibility: "hidden",
-      width,
-    });
-    container.appendChild(measure);
+    const measure = createMeasureElement(tag, styleAttr, width, container);
 
     const chunks: HTMLElement[] = [];
     let start = 0;
 
     while (start < words.length) {
-      let lo = start + 1;
-      let hi = words.length;
-
-      while (lo < hi) {
-        const mid = Math.ceil((lo + hi) / 2);
-        measure.textContent = words.slice(start, mid).join(" ");
-        if (measure.offsetHeight <= pageContentPx) {
-          lo = mid;
-        } else {
-          hi = mid - 1;
-        }
-      }
+      const lo = binarySearchWordFit(measure, words, pageContentPx, start);
 
       const chunk = document.createElement(tag);
       chunk.setAttribute("style", styleAttr);
@@ -376,13 +424,10 @@ function splitTableAtBoundary(
   container: HTMLElement,
   availableHeight: number,
 ): boolean {
-  const rows = Array.from(table.rows);
-  if (rows.length === 0) return false;
+  const parsed = parseTableStructure(table);
+  if (!parsed) return false;
 
-  const hasHeader = rows[0].querySelector("th") !== null;
-  const headerRow = hasHeader ? rows[0] : null;
-  const bodyRows = hasHeader ? rows.slice(1) : rows;
-  const headerHeight = headerRow ? headerRow.offsetHeight : 0;
+  const { headerRow, bodyRows, headerHeight } = parsed;
 
   if (bodyRows.length < 2) return false;
 
@@ -434,14 +479,7 @@ function splitTextAtBoundary(
   const styleAttr = el.getAttribute("style") || "";
   const width = getComputedStyle(el).width;
 
-  const measure = document.createElement(tag);
-  measure.setAttribute("style", styleAttr);
-  Object.assign(measure.style, {
-    position: "absolute",
-    visibility: "hidden",
-    width,
-  });
-  container.appendChild(measure);
+  const measure = createMeasureElement(tag, styleAttr, width, container);
 
   measure.textContent = words[0];
   if (measure.offsetHeight > availableHeight) {
@@ -449,17 +487,7 @@ function splitTextAtBoundary(
     return false;
   }
 
-  let lo = 1;
-  let hi = words.length;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    measure.textContent = words.slice(0, mid).join(" ");
-    if (measure.offsetHeight <= availableHeight) {
-      lo = mid;
-    } else {
-      hi = mid - 1;
-    }
-  }
+  const lo = binarySearchWordFit(measure, words, availableHeight, 0);
 
   measure.remove();
 
@@ -533,7 +561,7 @@ function insertPageBreakSpacers(
  */
 function prepare(
   source: HTMLElement,
-  opts: Partial<PageOptions> = {},
+  opts: PageOptionsInput = {},
 ): PrepareResult {
   const merged = resolveOptions(opts);
 
@@ -563,7 +591,7 @@ function prepare(
 async function generatePDF(
   doc: jsPDF,
   source: HTMLElement,
-  opts: Partial<PageOptions> & Pick<ImagePDFOptions, "marginContent"> = {},
+  opts: PageOptionsInput & Pick<ImagePDFOptions, "marginContent"> = {},
 ): Promise<jsPDF> {
   const { clone, layout, options, cleanup } = prepare(source, opts);
 
@@ -732,7 +760,7 @@ function resolveMarginOverride(
 ): Margin {
   if (m == null) return opts.margin;
   if (typeof m === "number") {
-    return { top: m, right: m, bottom: m, left: m };
+    return createUniformMargin(m);
   }
   return {
     top: m.top ?? opts.margin.top,
@@ -1005,17 +1033,84 @@ async function drawMarginContentOnCanvas(
   }
 }
 
-/**
- * Render an HTML element as an image-based PDF. Each page is a rasterized
- * screenshot — no selectable or extractable text in the output.
- */
-async function generateImagePDF(
-  source: HTMLElement,
-  opts: Partial<PageOptions> & ImagePDFOptions = {},
-): Promise<jsPDF> {
-  const { imageFormat = "JPEG", imageQuality = 0.7, scale = 2 } = opts;
-  const merged = resolveOptions(opts);
+interface PageDimensions {
+  contentWidthMm: number;
+  contentHeightMm: number;
+  contentWidthPx: number;
+  contentHeightPx: number;
+  pxPerMm: number;
+  pageWidthPx: number;
+  pageHeightPx: number;
+  marginTopPx: number;
+  marginLeftPx: number;
+}
 
+/** Compute all mm/px page dimensions from a rendered canvas and page options. */
+function computePageDimensions(
+  canvas: HTMLCanvasElement,
+  opts: PageOptions,
+): PageDimensions {
+  const contentWidthMm = opts.pageWidth - opts.margin.left - opts.margin.right;
+  const contentHeightMm =
+    opts.pageHeight - opts.margin.top - opts.margin.bottom;
+  const contentWidthPx = canvas.width;
+  const contentHeightPx = (contentHeightMm / contentWidthMm) * contentWidthPx;
+  const pxPerMm = contentWidthPx / contentWidthMm;
+
+  return {
+    contentWidthMm,
+    contentHeightMm,
+    contentWidthPx,
+    contentHeightPx,
+    pxPerMm,
+    pageWidthPx: Math.round(opts.pageWidth * pxPerMm),
+    pageHeightPx: Math.round(opts.pageHeight * pxPerMm),
+    marginTopPx: Math.round(opts.margin.top * pxPerMm),
+    marginLeftPx: Math.round(opts.margin.left * pxPerMm),
+  };
+}
+
+/** Create a single-page canvas by slicing a content region from the source canvas. */
+function createPageSliceCanvas(
+  sourceCanvas: HTMLCanvasElement,
+  pageIndex: number,
+  dims: PageDimensions,
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+  const sliceHeight = Math.min(
+    dims.contentHeightPx,
+    sourceCanvas.height - pageIndex * dims.contentHeightPx,
+  );
+
+  const pageCanvas = document.createElement("canvas");
+  pageCanvas.width = dims.pageWidthPx;
+  pageCanvas.height = dims.pageHeightPx;
+
+  const ctx = pageCanvas.getContext("2d");
+  if (!ctx) throw new Error("Could not get canvas context");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, dims.pageWidthPx, dims.pageHeightPx);
+
+  ctx.drawImage(
+    sourceCanvas,
+    0,
+    pageIndex * dims.contentHeightPx,
+    dims.contentWidthPx,
+    sliceHeight,
+    dims.marginLeftPx,
+    dims.marginTopPx,
+    dims.contentWidthPx,
+    sliceHeight,
+  );
+
+  return { canvas: pageCanvas, ctx };
+}
+
+/** Shared setup for image-based rendering (generateImagePDF & generateImages). */
+async function prepareImageRenderClone(
+  source: HTMLElement,
+  merged: PageOptions,
+): Promise<{ clone: HTMLElement; layout: Layout; cleanup: () => void }> {
   const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
   clone.style.opacity = "1";
@@ -1028,6 +1123,28 @@ async function generateImagePDF(
   insertPageBreakSpacers(clone, layout.pageContentPx);
   await expandToFitOverflow(clone);
 
+  return {
+    clone,
+    layout,
+    cleanup: () => {
+      clone.remove();
+      removeResetStyles();
+    },
+  };
+}
+
+/**
+ * Render an HTML element as an image-based PDF. Each page is a rasterized
+ * screenshot — no selectable or extractable text in the output.
+ */
+async function generateImagePDF(
+  source: HTMLElement,
+  opts: PageOptionsInput & ImagePDFOptions = {},
+): Promise<jsPDF> {
+  const { imageFormat = "JPEG", imageQuality = 0.7, scale = 2 } = opts;
+  const merged = resolveOptions(opts);
+  const { clone, cleanup } = await prepareImageRenderClone(source, merged);
+
   try {
     const canvas = await html2canvas(clone, {
       scale,
@@ -1036,15 +1153,8 @@ async function generateImagePDF(
 
     const { jsPDF: JsPDF } = await import("jspdf");
 
-    const contentWidthMm =
-      merged.pageWidth - merged.margin.left - merged.margin.right;
-    const contentHeightMm =
-      merged.pageHeight - merged.margin.top - merged.margin.bottom;
-
-    const contentWidthPx = canvas.width;
-    const contentHeightPx = (contentHeightMm / contentWidthMm) * contentWidthPx;
-
-    const totalPages = Math.ceil(canvas.height / contentHeightPx);
+    const dims = computePageDimensions(canvas, merged);
+    const totalPages = Math.ceil(canvas.height / dims.contentHeightPx);
     const orientation = merged.pageWidth > merged.pageHeight ? "l" : "p";
 
     const imagePDF = new JsPDF({
@@ -1053,39 +1163,8 @@ async function generateImagePDF(
       format: [merged.pageWidth, merged.pageHeight],
     });
 
-    const pxPerMm = contentWidthPx / contentWidthMm;
-    const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
-    const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
-    const marginTopPx = Math.round(merged.margin.top * pxPerMm);
-    const marginLeftPx = Math.round(merged.margin.left * pxPerMm);
-
     for (let i = 0; i < totalPages; i++) {
-      const sliceHeight = Math.min(
-        contentHeightPx,
-        canvas.height - i * contentHeightPx,
-      );
-
-      const pageCanvas = document.createElement("canvas");
-      pageCanvas.width = pageWidthPx;
-      pageCanvas.height = pageHeightPx;
-
-      const ctx = pageCanvas.getContext("2d");
-      if (!ctx) throw new Error("Could not get canvas context");
-
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, pageWidthPx, pageHeightPx);
-
-      ctx.drawImage(
-        canvas,
-        0,
-        i * contentHeightPx,
-        contentWidthPx,
-        sliceHeight,
-        marginLeftPx,
-        marginTopPx,
-        contentWidthPx,
-        sliceHeight,
-      );
+      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(canvas, i, dims);
 
       const imageData = pageCanvas.toDataURL(
         `image/${imageFormat.toLowerCase()}`,
@@ -1114,8 +1193,7 @@ async function generateImagePDF(
 
     return imagePDF;
   } finally {
-    clone.remove();
-    removeResetStyles();
+    cleanup();
   }
 }
 
@@ -1126,22 +1204,11 @@ async function generateImagePDF(
  */
 async function generateImages(
   source: HTMLElement,
-  opts: Partial<PageOptions> & ImagePDFOptions = {},
+  opts: PageOptionsInput & ImagePDFOptions = {},
 ): Promise<string[]> {
   const { imageFormat = "PNG", imageQuality = 0.75, scale = 2 } = opts;
   const merged = resolveOptions(opts);
-
-  const removeResetStyles = injectRenderResetStyles();
-  const clone = createPrintClone(source, merged.pageWidth);
-  clone.style.opacity = "1";
-  clone.style.left = "-99999px";
-  normalizeTableAttributes(clone);
-  const layout = computeLayout(clone, merged);
-
-  splitOversizedTables(clone, layout.pageContentPx);
-  splitOversizedText(clone, layout.pageContentPx);
-  insertPageBreakSpacers(clone, layout.pageContentPx);
-  await expandToFitOverflow(clone);
+  const { clone, cleanup } = await prepareImageRenderClone(source, merged);
 
   try {
     const canvas = await html2canvas(clone, {
@@ -1149,22 +1216,8 @@ async function generateImages(
       backgroundColor: "#ffffff",
     });
 
-    const contentWidthMm =
-      merged.pageWidth - merged.margin.left - merged.margin.right;
-    const contentHeightMm =
-      merged.pageHeight - merged.margin.top - merged.margin.bottom;
-
-    const contentWidthPx = canvas.width;
-    const contentHeightPx = (contentHeightMm / contentWidthMm) * contentWidthPx;
-
-    // Compute full page dimensions in pixels (including margins)
-    const pxPerMm = contentWidthPx / contentWidthMm;
-    const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
-    const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
-    const marginTopPx = Math.round(merged.margin.top * pxPerMm);
-    const marginLeftPx = Math.round(merged.margin.left * pxPerMm);
-
-    const totalPages = Math.ceil(canvas.height / contentHeightPx);
+    const dims = computePageDimensions(canvas, merged);
+    const totalPages = Math.ceil(canvas.height / dims.contentHeightPx);
     const images: string[] = [];
 
     const { marginContent } = opts;
@@ -1173,43 +1226,15 @@ async function generateImages(
       : {};
 
     for (let i = 0; i < totalPages; i++) {
-      const sliceHeight = Math.min(
-        contentHeightPx,
-        canvas.height - i * contentHeightPx,
-      );
+      const { canvas: pageCanvas, ctx } = createPageSliceCanvas(canvas, i, dims);
 
-      const pageCanvas = document.createElement("canvas");
-      pageCanvas.width = pageWidthPx;
-      pageCanvas.height = pageHeightPx;
-
-      const ctx = pageCanvas.getContext("2d");
-      if (!ctx) throw new Error("Could not get canvas context");
-
-      // Fill with white (the full page background)
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, pageWidthPx, pageHeightPx);
-
-      // Draw the content slice at the margin offset
-      ctx.drawImage(
-        canvas,
-        0,
-        i * contentHeightPx,
-        contentWidthPx,
-        sliceHeight,
-        marginLeftPx,
-        marginTopPx,
-        contentWidthPx,
-        sliceHeight,
-      );
-
-      // Draw margin content (headers, footers, borders)
       if (marginContent) {
         await drawMarginContentOnCanvas(
           ctx,
           marginContent,
           staticCache,
           merged,
-          pxPerMm,
+          dims.pxPerMm,
           i + 1,
           totalPages,
           scale,
@@ -1226,8 +1251,7 @@ async function generateImages(
 
     return images;
   } finally {
-    clone.remove();
-    removeResetStyles();
+    cleanup();
   }
 }
 
@@ -1238,7 +1262,7 @@ async function generateImages(
 async function previewImages(
   source: HTMLElement,
   container: HTMLElement,
-  opts: Partial<PageOptions> & ImagePDFOptions = {},
+  opts: PageOptionsInput & ImagePDFOptions = {},
 ): Promise<void> {
   const merged = resolveOptions(opts);
   const images = await generateImages(source, opts);
@@ -1282,7 +1306,7 @@ async function previewImages(
 async function addMarginContent(
   doc: jsPDF,
   content: MarginContentInput,
-  opts: Partial<PageOptions> = {},
+  opts: PageOptionsInput = {},
 ): Promise<jsPDF> {
   const merged = resolveOptions(opts);
   const totalPages = doc.getNumberOfPages();
