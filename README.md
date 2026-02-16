@@ -1,6 +1,7 @@
 # jsPDF Utils
 
-HTML to PDF utilities for jsPDF with support for Arabic text, tables, and automatic page breaking.
+Utilities for rendering HTML into paginated PDF output with `jsPDF` and
+`html2canvas`.
 
 ## Installation
 
@@ -8,78 +9,128 @@ HTML to PDF utilities for jsPDF with support for Arabic text, tables, and automa
 npm install jspdf-utils jspdf html2canvas
 ```
 
-## Usage
+## Exported API
 
-```javascript
+- `generatePDF(doc, source, opts)`
+- `generateImagePDF(source, opts)`
+- `generateImages(source, opts)`
+- `previewImages(source, container, opts)`
+- `PAGE_SIZES`
+- `PAGE_MARGINS`
+- Types: `PageOptions`, `PageOptionsInput`, `ImagePDFOptions`
+
+Type import example:
+
+```ts
+import type { PageOptionsInput } from "jspdf-utils";
+```
+
+## Quick Start
+
+### 1) HTML -> vector/text PDF (`doc.html`)
+
+```ts
 import jsPDF from "jspdf";
-import { renderHTML } from "jspdf-utils";
+import { generatePDF } from "jspdf-utils";
+
+const target = document.getElementById("print-section");
+if (!target) throw new Error("Missing #print-section");
 
 const doc = new jsPDF({ unit: "mm", format: "a4" });
 
-// Add fonts if needed for Arabic/RTL text
-doc.addFont("path/to/arial.ttf", "arial", "normal", "normal");
-doc.addFont("path/to/arial-bold.ttf", "arial", "normal", "bold");
+// Optional for Arabic/RTL text:
+// doc.addFont("/fonts/arial.ttf", "arial", "normal");
+// doc.addFont("/fonts/arial-bold.ttf", "arial", "bold");
 
-// Render HTML element to PDF
-const element = document.getElementById("content");
-await renderHTML(doc, element);
+await generatePDF(doc, target, {
+  margin: { top: 20, right: 20, bottom: 20, left: 20 },
+  forcedPageCount: 1,
+});
 
 doc.save("output.pdf");
 ```
 
-## Features
+### 2) HTML -> image-based PDF (raster pages)
 
-- **Automatic page breaking**: Prevents tables and text from being split awkwardly
-- **Table splitting**: Large tables are split across pages with repeated headers
-- **Text wrapping**: Long text blocks are intelligently broken at word boundaries
-- **RTL/Arabic support**: Works with right-to-left languages when proper fonts are loaded
+```ts
+import { generateImagePDF } from "jspdf-utils";
+
+const target = document.getElementById("print-section");
+if (!target) throw new Error("Missing #print-section");
+
+const imagePDF = await generateImagePDF(target, {
+  format: "a5",
+  imageFormat: "PNG",
+  forcedPageCount: 1,
+});
+
+imagePDF.save("output-image.pdf");
+```
+
+### 3) Preview pages as images in a container
+
+```ts
+import { previewImages } from "jspdf-utils";
+
+const target = document.getElementById("print-section");
+const preview = document.getElementById("preview-container");
+if (!target || !preview) throw new Error("Missing preview elements");
+
+await previewImages(target, preview, {
+  format: "a5",
+  forcedPageCount: 1,
+});
+```
+
+## Options
+
+### `PageOptionsInput`
+
+- `unit?: string` (default: `"mm"`)
+- `format?: "a0" | "a1" | "a2" | "a3" | "a4" | "a5" | "a6" | "letter" | "legal" | "tabloid"` (default: `"a4"`)
+- `pageWidth?: number` (default comes from `format`)
+- `pageHeight?: number` (default comes from `format`)
+- `margin?: number | { top?: number; right?: number; bottom?: number; left?: number }`
+
+### `ImagePDFOptions`
+
+- `imageFormat?: "JPEG" | "PNG"`
+- `imageQuality?: number`
+- `scale?: number`
+- `marginContent?: MarginContentInput`
+- `forcedPageCount?: number`
+
+`forcedPageCount` behavior:
+
+- Forces output to the first `N` pages only.
+- `generatePDF`: trims extra pages after `doc.html` rendering.
+- `generateImagePDF`: only rasterizes and writes first `N` pages.
+- `generateImages` and `previewImages`: only returns/displays first `N` pages.
+- Invalid values (`<= 0`, `NaN`, `Infinity`) are ignored.
+
+## Margin Content and Borders
+
+`marginContent` supports:
+
+- `top`, `right`, `bottom`, `left` as:
+  - `HTMLElement`, or
+  - `(page: number, totalPages: number) => HTMLElement`
+- `contentBorder` (vector rectangle)
+- `textBorder` (repeated text around page edges)
+
+Rendering order:
+
+- Margin content and borders are rendered beneath page content.
+- Main document content stays visually above borders/text borders.
 
 ## Development
-
-### Running the Example
 
 ```bash
 npm install
 npm run dev
-# Open http://localhost:5173
 ```
 
-### Project Structure
-
-```
-├── src/
-│   └── html-to-pdf.js    # Main utility functions
-├── index.html             # Example/demo page
-└── package.json
-```
-
-## API
-
-### `renderHTML(doc, source, opts)`
-
-Renders an HTML element to PDF.
-
-- **doc**: jsPDF instance
-- **source**: HTML element to render
-- **opts**: Optional configuration (overrides defaults)
-
-### `prepare(source, opts)`
-
-Prepares an HTML element for rendering (used internally by renderHTML).
-
-Returns: `{ clone, layout, options, cleanup }`
-
-### Default Options
-
-```javascript
-{
-  unit: 'mm',
-  format: 'a4',
-  pageWidth: 210,
-  pageHeight: 297,
-  margin: { top: 20, right: 20, bottom: 20, left: 20 }
-}
-```
+Open [http://localhost:5173](http://localhost:5173).
 
 ## License
 
