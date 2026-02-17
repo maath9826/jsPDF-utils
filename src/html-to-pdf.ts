@@ -255,10 +255,7 @@ const SNAPSHOT_PROPERTIES = [
  * variables and @layer rules are fully resolved, then writes concrete
  * inline values onto the clone.
  */
-function snapshotComputedStyles(
-  source: HTMLElement,
-  clone: HTMLElement,
-): void {
+function snapshotComputedStyles(source: HTMLElement, clone: HTMLElement): void {
   const sourceEls = source.querySelectorAll("*");
   const cloneEls = clone.querySelectorAll("*");
   const count = Math.min(sourceEls.length, cloneEls.length);
@@ -780,7 +777,17 @@ async function generatePDF(
 }
 
 type MarginSlot = "top" | "right" | "bottom" | "left";
-type MarginFactory = (page: number, totalPages: number) => HTMLElement;
+type MarginResult = HTMLElement | string | null | undefined | void;
+type MarginFactory = (page: number, totalPages: number) => MarginResult;
+
+/** Convert a factory result to an HTMLElement, or null to skip. */
+function resolveMarginResult(value: MarginResult): HTMLElement | null {
+  if (!value) return null;
+  if (value instanceof HTMLElement) return value;
+  const container = document.createElement("div");
+  container.innerHTML = value;
+  return container;
+}
 
 export interface ContentBorder {
   /** Stroke color (default: "#000000") */
@@ -813,10 +820,10 @@ export interface TextBorder {
 }
 
 export interface MarginContentInput {
-  top?: HTMLElement | MarginFactory;
-  right?: HTMLElement | MarginFactory;
-  bottom?: HTMLElement | MarginFactory;
-  left?: HTMLElement | MarginFactory;
+  top?: HTMLElement | string | MarginFactory;
+  right?: HTMLElement | string | MarginFactory;
+  bottom?: HTMLElement | string | MarginFactory;
+  left?: HTMLElement | string | MarginFactory;
   /** Draw a rectangle border around the content area. */
   contentBorder?: ContentBorder;
   /** Draw a repeated-text border around the content area. */
@@ -974,12 +981,18 @@ async function preRenderStaticSlots(
     const val = content[slot];
     if (val && typeof val !== "function") {
       const rect = getSlotRect(slot, opts);
-      cache[slot] = await renderSlotToCanvas(
-        val.cloneNode(true) as HTMLElement,
-        rect.width,
-        rect.height,
-        scale,
-      );
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const el = resolveMarginResult(val);
+      if (el) {
+        cache[slot] = await renderSlotToCanvas(
+          val instanceof HTMLElement
+            ? (val.cloneNode(true) as HTMLElement)
+            : el,
+          rect.width,
+          rect.height,
+          scale,
+        );
+      }
     }
   }
   return cache;
@@ -1214,16 +1227,16 @@ async function drawMarginContentOnCanvas(
     if (!val) continue;
 
     const rect = getSlotRect(slot, opts);
+    if (rect.width <= 0 || rect.height <= 0) continue;
+
     let slotCanvas: HTMLCanvasElement;
 
     if (typeof val === "function") {
-      slotCanvas = await renderSlotToCanvas(
-        val(page, totalPages),
-        rect.width,
-        rect.height,
-        scale,
-      );
+      const el = resolveMarginResult(val(page, totalPages));
+      if (!el) continue;
+      slotCanvas = await renderSlotToCanvas(el, rect.width, rect.height, scale);
     } else {
+      if (!staticCache[slot]) continue;
       slotCanvas = staticCache[slot]!;
     }
 
@@ -1640,12 +1653,16 @@ async function addMarginContent(
       if (!val) continue;
 
       const rect = getSlotRect(slot, merged);
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
       let dataUrl: string;
       let alias: string | undefined;
 
       if (typeof val === "function") {
+        const el = resolveMarginResult(val(i, totalPages));
+        if (!el) continue;
         const slotCanvas = await renderSlotToCanvas(
-          val(i, totalPages),
+          el,
           rect.width,
           rect.height,
           scale,

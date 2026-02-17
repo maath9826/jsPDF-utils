@@ -228,6 +228,8 @@
         textBorder: pdfOptions,
       };
 
+      pdfOptions.marginContent = marginContent;
+
       const pdfOpts = pdfOptions;
 
       const doc = new jsPDF(pdfOpts);
