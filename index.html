@@ -192,14 +192,16 @@
       const pdfOptions = {
         format: "a5",
         margin: { top: 10, bottom: 0, left: 12, right: 12 },
-        forcedPageCount: 1,
-        marginContent: {
-          textBorder: {
-            text: `اسم المشروع ${RECEIPT_DATA.companyName} - وصل قبض - تاريخ الوصل ${convertDateFormat(RECEIPT_DATA.createdAt)} - مبلغ الوصل الكلي ${RECEIPT_DATA.total.toLocaleString()} - رقم الوصل ${RECEIPT_DATA.number} - `,
-            fontSize: 2,
-            margin: 6,
-            fontWeight: "bold",
-          },
+        textBorder: {
+          text: `اسم المشروع ${RECEIPT_DATA.companyName} - وصل قبض - تاريخ الوصل ${convertDateFormat(RECEIPT_DATA.createdAt)} - مبلغ الوصل الكلي ${RECEIPT_DATA.total.toLocaleString()} - رقم الوصل ${RECEIPT_DATA.number} - `,
+          fontSize: 2,
+          margin: 6,
+          fontWeight: "bold",
+        },
+        border: {
+          color: "#000",
+          width: 1,
+          margin: 4,
         },
       };
 
@@ -225,10 +227,7 @@
           `;
           return el;
         },
-        textBorder: pdfOptions,
       };
-
-      pdfOptions.marginContent = marginContent;
 
       const pdfOpts = pdfOptions;
 
