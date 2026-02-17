@@ -829,6 +829,10 @@ export interface MarginContentInput {
   right?: HTMLElement | string | MarginFactory;
   bottom?: HTMLElement | string | MarginFactory;
   left?: HTMLElement | string | MarginFactory;
+  /** Distance in mm from the page edge to the margin content area (default: uses page margins). */
+  margin?:
+    | number
+    | { top?: number; right?: number; bottom?: number; left?: number };
 }
 
 export interface ImagePDFOptions {
@@ -881,24 +885,26 @@ function trimDocumentToForcedPageCount(
 function getSlotRect(
   slot: MarginSlot,
   opts: PageOptions,
+  margin?: Margin,
 ): { x: number; y: number; width: number; height: number } {
+  const m = margin ?? opts.margin;
   switch (slot) {
     case "top":
-      return { x: 0, y: 0, width: opts.pageWidth, height: opts.margin.top };
+      return { x: 0, y: 0, width: opts.pageWidth, height: m.top };
     case "bottom":
       return {
         x: 0,
-        y: opts.pageHeight - opts.margin.bottom,
+        y: opts.pageHeight - m.bottom,
         width: opts.pageWidth,
-        height: opts.margin.bottom,
+        height: m.bottom,
       };
     case "left":
-      return { x: 0, y: 0, width: opts.margin.left, height: opts.pageHeight };
+      return { x: 0, y: 0, width: m.left, height: opts.pageHeight };
     case "right":
       return {
-        x: opts.pageWidth - opts.margin.right,
+        x: opts.pageWidth - m.right,
         y: 0,
-        width: opts.margin.right,
+        width: m.right,
         height: opts.pageHeight,
       };
   }
@@ -995,11 +1001,12 @@ async function preRenderStaticSlots(
   opts: PageOptions,
   scale: number,
 ): Promise<Partial<Record<MarginSlot, HTMLCanvasElement>>> {
+  const contentMargin = resolveMarginOverride(content.margin, opts, createUniformMargin(PAGE_MARGINS[opts.format]));
   const cache: Partial<Record<MarginSlot, HTMLCanvasElement>> = {};
   for (const slot of MARGIN_SLOTS) {
     const val = content[slot];
     if (val && typeof val !== "function") {
-      const rect = getSlotRect(slot, opts);
+      const rect = getSlotRect(slot, opts, contentMargin);
       if (rect.width <= 0 || rect.height <= 0) continue;
       const el = resolveMarginResult(val);
       if (el) {
@@ -1024,16 +1031,18 @@ function resolveMarginOverride(
     | number
     | { top?: number; right?: number; bottom?: number; left?: number },
   opts: PageOptions,
+  fallback?: Margin,
 ): Margin {
-  if (m == null) return opts.margin;
+  const fb = fallback ?? opts.margin;
+  if (m == null) return fb;
   if (typeof m === "number") {
     return createUniformMargin(m);
   }
   return {
-    top: m.top ?? opts.margin.top,
-    right: m.right ?? opts.margin.right,
-    bottom: m.bottom ?? opts.margin.bottom,
-    left: m.left ?? opts.margin.left,
+    top: m.top ?? fb.top,
+    right: m.right ?? fb.right,
+    bottom: m.bottom ?? fb.bottom,
+    left: m.left ?? fb.left,
   };
 }
 
@@ -1244,11 +1253,12 @@ async function drawMarginContentOnCanvas(
   border?: Border,
 ): Promise<void> {
   if (content) {
+    const contentMargin = resolveMarginOverride(content.margin, opts, createUniformMargin(PAGE_MARGINS[opts.format]));
     for (const slot of MARGIN_SLOTS) {
       const val = content[slot];
       if (!val) continue;
 
-      const rect = getSlotRect(slot, opts);
+      const rect = getSlotRect(slot, opts, contentMargin);
       if (rect.width <= 0 || rect.height <= 0) continue;
 
       let slotCanvas: HTMLCanvasElement;
@@ -1680,11 +1690,12 @@ async function addMarginContent(
 
     // Render each margin slot as an individual small image
     if (content) {
+      const contentMargin = resolveMarginOverride(content.margin, merged, createUniformMargin(PAGE_MARGINS[merged.format]));
       for (const slot of MARGIN_SLOTS) {
         const val = content[slot];
         if (!val) continue;
 
-        const rect = getSlotRect(slot, merged);
+        const rect = getSlotRect(slot, merged, contentMargin);
         if (rect.width <= 0 || rect.height <= 0) continue;
 
         let dataUrl: string;
