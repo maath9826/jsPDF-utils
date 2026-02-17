@@ -133,10 +133,158 @@ function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
 }
 
 /**
+ * CSS properties to snapshot from source computed styles onto the clone.
+ * Resolves CSS custom properties (e.g. Tailwind v4's
+ * `calc(var(--spacing) * 8)`) to concrete values that survive
+ * html2canvas's internal cloning.
+ *
+ * Width/height/position properties are excluded so the clone can
+ * reflow to the target page width.
+ */
+const SNAPSHOT_PROPERTIES = [
+  // Spacing
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
+  "margin-top",
+  "margin-right",
+  "margin-bottom",
+  "margin-left",
+  // Typography
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "font-variant",
+  "line-height",
+  "letter-spacing",
+  "word-spacing",
+  "text-align",
+  "text-decoration-line",
+  "text-decoration-color",
+  "text-decoration-style",
+  "text-transform",
+  "text-indent",
+  "text-overflow",
+  "text-shadow",
+  "white-space",
+  "word-break",
+  "overflow-wrap",
+  "direction",
+  // Colors & backgrounds
+  "color",
+  "background-color",
+  "background-image",
+  "background-size",
+  "background-position",
+  "background-repeat",
+  "background-clip",
+  // Borders
+  "border-top-width",
+  "border-right-width",
+  "border-bottom-width",
+  "border-left-width",
+  "border-top-style",
+  "border-right-style",
+  "border-bottom-style",
+  "border-left-style",
+  "border-top-color",
+  "border-right-color",
+  "border-bottom-color",
+  "border-left-color",
+  "border-top-left-radius",
+  "border-top-right-radius",
+  "border-bottom-left-radius",
+  "border-bottom-right-radius",
+  "outline-width",
+  "outline-style",
+  "outline-color",
+  "outline-offset",
+  // Layout
+  "display",
+  "flex-direction",
+  "flex-wrap",
+  "flex-grow",
+  "flex-shrink",
+  "flex-basis",
+  "justify-content",
+  "align-items",
+  "align-self",
+  "align-content",
+  "order",
+  "grid-template-columns",
+  "grid-template-rows",
+  "grid-column-start",
+  "grid-column-end",
+  "grid-row-start",
+  "grid-row-end",
+  "grid-auto-flow",
+  "grid-auto-columns",
+  "grid-auto-rows",
+  "gap",
+  "row-gap",
+  "column-gap",
+  // Box model
+  "box-sizing",
+  "overflow",
+  "overflow-x",
+  "overflow-y",
+  // Effects
+  "opacity",
+  "box-shadow",
+  "filter",
+  "backdrop-filter",
+  "mix-blend-mode",
+  // Visibility
+  "visibility",
+  // Table
+  "border-collapse",
+  "border-spacing",
+  "table-layout",
+  // List
+  "list-style-type",
+  "list-style-position",
+  // Vertical align
+  "vertical-align",
+];
+
+/**
+ * Snapshot computed styles from source elements onto matching clone elements.
+ * Reads from the source (still in its original CSS context) so all CSS
+ * variables and @layer rules are fully resolved, then writes concrete
+ * inline values onto the clone.
+ */
+function snapshotComputedStyles(
+  source: HTMLElement,
+  clone: HTMLElement,
+): void {
+  const sourceEls = source.querySelectorAll("*");
+  const cloneEls = clone.querySelectorAll("*");
+  const count = Math.min(sourceEls.length, cloneEls.length);
+
+  for (let i = 0; i < count; i++) {
+    const srcEl = sourceEls[i];
+    const clnEl = cloneEls[i];
+    if (!(srcEl instanceof HTMLElement) || !(clnEl instanceof HTMLElement))
+      continue;
+
+    const computed = getComputedStyle(srcEl);
+    for (const prop of SNAPSHOT_PROPERTIES) {
+      const value = computed.getPropertyValue(prop);
+      if (value) {
+        clnEl.style.setProperty(prop, value);
+      }
+    }
+  }
+}
+
+/**
  * Clone an element and position it off-screen at print width for measurement.
  */
 function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
+  snapshotComputedStyles(source, clone);
   Object.assign(clone.style, {
     position: "fixed",
     top: "0",
