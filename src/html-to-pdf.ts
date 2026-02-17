@@ -255,7 +255,19 @@ const SNAPSHOT_PROPERTIES = [
  * variables and @layer rules are fully resolved, then writes concrete
  * inline values onto the clone.
  */
+function snapshotElementStyles(source: HTMLElement, clone: HTMLElement): void {
+  const computed = getComputedStyle(source);
+  for (const prop of SNAPSHOT_PROPERTIES) {
+    const value = computed.getPropertyValue(prop);
+    if (value) {
+      clone.style.setProperty(prop, value);
+    }
+  }
+}
+
 function snapshotComputedStyles(source: HTMLElement, clone: HTMLElement): void {
+  snapshotElementStyles(source, clone);
+
   const sourceEls = source.querySelectorAll("*");
   const cloneEls = clone.querySelectorAll("*");
   const count = Math.min(sourceEls.length, cloneEls.length);
@@ -265,14 +277,7 @@ function snapshotComputedStyles(source: HTMLElement, clone: HTMLElement): void {
     const clnEl = cloneEls[i];
     if (!(srcEl instanceof HTMLElement) || !(clnEl instanceof HTMLElement))
       continue;
-
-    const computed = getComputedStyle(srcEl);
-    for (const prop of SNAPSHOT_PROPERTIES) {
-      const value = computed.getPropertyValue(prop);
-      if (value) {
-        clnEl.style.setProperty(prop, value);
-      }
-    }
+    snapshotElementStyles(srcEl, clnEl);
   }
 }
 
@@ -905,6 +910,20 @@ async function renderSlotToCanvas(
   heightMm: number,
   scale: number,
 ): Promise<HTMLCanvasElement> {
+  // Temporarily place in DOM so CSS variables and rules resolve
+  const measure = document.createElement("div");
+  Object.assign(measure.style, {
+    position: "fixed",
+    left: "-99999px",
+    top: "0",
+  });
+  measure.appendChild(el);
+  document.body.appendChild(measure);
+
+  const renderEl = el.cloneNode(true) as HTMLElement;
+  snapshotComputedStyles(el, renderEl);
+  measure.remove();
+
   const wrapper = document.createElement("div");
   Object.assign(wrapper.style, {
     position: "fixed",
@@ -914,7 +933,7 @@ async function renderSlotToCanvas(
     height: heightMm + "mm",
     overflow: "hidden",
   });
-  wrapper.appendChild(el);
+  wrapper.appendChild(renderEl);
   document.body.appendChild(wrapper);
 
   try {
