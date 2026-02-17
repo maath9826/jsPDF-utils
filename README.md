@@ -17,7 +17,7 @@ npm install jspdf-utils jspdf html2canvas-pro
 - `previewImages(source, container, opts)`
 - `PAGE_SIZES`
 - `PAGE_MARGINS`
-- Types: `PageOptions`, `PageOptionsInput`, `ImagePDFOptions`
+- Types: `PageOptions`, `PageOptionsInput`, `ImagePDFOptions`, `MarginContentInput`, `Border`, `TextBorder`
 
 Type import example:
 
@@ -106,6 +106,8 @@ Important:
 - `imageQuality?: number`
 - `scale?: number`
 - `marginContent?: MarginContentInput`
+- `border?: Border`
+- `textBorder?: TextBorder`
 - `forcedPageCount?: number`
 
 `forcedPageCount` behavior:
@@ -118,18 +120,42 @@ Important:
 
 ## Margin Content and Borders
 
-`marginContent` supports:
+`marginContent`, `border`, and `textBorder` are independent, top-level page
+options. Each has its own `margin` property that controls its distance from the
+page edge, fully decoupled from the main `margin` (which only controls where
+the HTML content is placed).
 
-- `top`, `right`, `bottom`, `left` as:
-  - `HTMLElement`, or
-  - `(page: number, totalPages: number) => HTMLElement`
-- `contentBorder` (vector rectangle)
-- `textBorder` (repeated text around page edges)
+### `MarginContentInput`
 
-Rendering order:
+- `top`, `right`, `bottom`, `left` — each accepts:
+  - `HTMLElement` or `string` (static, rendered once and reused), or
+  - `(page: number, totalPages: number) => HTMLElement | string` (per-page)
+- `margin?` — distance in mm from the page edge to the content area (default: format default margin)
 
-- Margin content and borders are rendered beneath page content.
-- Main document content stays visually above borders/text borders.
+### `Border`
+
+Draws a vector rectangle around the page.
+
+- `color?: string` (default: `"#000000"`)
+- `width?: number` — line width in mm (default: `0.3`)
+- `margin?` — distance in mm from the page edge to the border (default: page margin)
+
+### `TextBorder`
+
+Draws repeated text along all four page edges.
+
+- `text: string` — the text to repeat
+- `color?: string` (default: `"#000000"`)
+- `fontSize?: number` — in mm (default: `2.5`)
+- `fontFamily?: string` (default: `"Arial, sans-serif"`)
+- `fontWeight?: string` (default: `"normal"`)
+- `gap?: number` — gap between repetitions in mm (default: `fontSize * 0.5`)
+- `margin?` — distance in mm from the page edge to the text border (default: page margin)
+
+### Rendering order
+
+- Margin content, borders, and text borders are rendered beneath page content.
+- Main document content stays visually above them.
 
 ## Development
 
