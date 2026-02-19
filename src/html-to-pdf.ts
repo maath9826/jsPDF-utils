@@ -745,7 +745,10 @@ async function generatePDF(
   doc: jsPDF,
   source: HTMLElement,
   opts: PageOptionsInput &
-    Pick<ImagePDFOptions, "marginContent" | "forcedPageCount" | "textBorder" | "border"> = {},
+    Pick<
+      ImagePDFOptions,
+      "marginContent" | "forcedPageCount" | "textBorder" | "border"
+    > = {},
 ): Promise<jsPDF> {
   const { clone, layout, options, cleanup } = prepare(source, opts);
 
@@ -774,7 +777,13 @@ async function generatePDF(
 
   if (opts.marginContent || opts.textBorder || opts.border) {
     const originalPageOpLengths = snapshotPageStreamLengths(doc);
-    await addMarginContent(doc, opts.marginContent, opts, opts.textBorder, opts.border);
+    await addMarginContent(
+      doc,
+      opts.marginContent,
+      opts,
+      opts.textBorder,
+      opts.border,
+    );
     moveAddedPageOpsToBackground(doc, originalPageOpLengths);
   }
 
@@ -916,6 +925,20 @@ async function renderSlotToCanvas(
   heightMm: number,
   scale: number,
 ): Promise<HTMLCanvasElement> {
+  // Clone so the original element is never moved out of the DOM
+  const source = el.cloneNode(true) as HTMLElement;
+  if (el.isConnected) {
+    snapshotComputedStyles(el, source);
+  }
+  // Reset any off-screen positioning (e.g. hidden via absolute/fixed + offsets)
+  // so the clone renders in normal flow within the wrapper
+  Object.assign(source.style, {
+    left: "auto",
+    right: "auto",
+    top: "auto",
+    bottom: "auto",
+  });
+
   // Temporarily place in DOM so CSS variables and rules resolve
   const measure = document.createElement("div");
   Object.assign(measure.style, {
@@ -923,11 +946,11 @@ async function renderSlotToCanvas(
     left: "-99999px",
     top: "0",
   });
-  measure.appendChild(el);
+  measure.appendChild(source);
   document.body.appendChild(measure);
 
-  const renderEl = el.cloneNode(true) as HTMLElement;
-  snapshotComputedStyles(el, renderEl);
+  const renderEl = source.cloneNode(true) as HTMLElement;
+  snapshotComputedStyles(source, renderEl);
   measure.remove();
 
   const wrapper = document.createElement("div");
@@ -1001,7 +1024,11 @@ async function preRenderStaticSlots(
   opts: PageOptions,
   scale: number,
 ): Promise<Partial<Record<MarginSlot, HTMLCanvasElement>>> {
-  const contentMargin = resolveMarginOverride(content.margin, opts, createUniformMargin(PAGE_MARGINS[opts.format]));
+  const contentMargin = resolveMarginOverride(
+    content.margin,
+    opts,
+    createUniformMargin(PAGE_MARGINS[opts.format]),
+  );
   const cache: Partial<Record<MarginSlot, HTMLCanvasElement>> = {};
   for (const slot of MARGIN_SLOTS) {
     const val = content[slot];
@@ -1253,7 +1280,11 @@ async function drawMarginContentOnCanvas(
   border?: Border,
 ): Promise<void> {
   if (content) {
-    const contentMargin = resolveMarginOverride(content.margin, opts, createUniformMargin(PAGE_MARGINS[opts.format]));
+    const contentMargin = resolveMarginOverride(
+      content.margin,
+      opts,
+      createUniformMargin(PAGE_MARGINS[opts.format]),
+    );
     for (const slot of MARGIN_SLOTS) {
       const val = content[slot];
       if (!val) continue;
@@ -1266,7 +1297,12 @@ async function drawMarginContentOnCanvas(
       if (typeof val === "function") {
         const el = resolveMarginResult(val(page, totalPages));
         if (!el) continue;
-        slotCanvas = await renderSlotToCanvas(el, rect.width, rect.height, scale);
+        slotCanvas = await renderSlotToCanvas(
+          el,
+          rect.width,
+          rect.height,
+          scale,
+        );
       } else {
         if (!staticCache[slot]) continue;
         slotCanvas = staticCache[slot]!;
@@ -1690,7 +1726,11 @@ async function addMarginContent(
 
     // Render each margin slot as an individual small image
     if (content) {
-      const contentMargin = resolveMarginOverride(content.margin, merged, createUniformMargin(PAGE_MARGINS[merged.format]));
+      const contentMargin = resolveMarginOverride(
+        content.margin,
+        merged,
+        createUniformMargin(PAGE_MARGINS[merged.format]),
+      );
       for (const slot of MARGIN_SLOTS) {
         const val = content[slot];
         if (!val) continue;
