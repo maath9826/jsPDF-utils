@@ -538,6 +538,13 @@ function splitOversizedText(
     if (htmlEl.offsetHeight <= pageContentPx || htmlEl.tagName === "TABLE")
       continue;
 
+    // If element has child elements, recurse into it instead of flattening
+    // its subtree into plain text (which would destroy nested structure).
+    if (htmlEl.children.length > 0) {
+      splitOversizedText(htmlEl, pageContentPx);
+      continue;
+    }
+
     const tag = htmlEl.tagName;
     const styleAttr = htmlEl.getAttribute("style") || "";
     const width = getComputedStyle(htmlEl).width;
@@ -625,6 +632,8 @@ function splitTextAtBoundary(
   availableHeight: number,
 ): boolean {
   if (el.tagName === "TABLE" || el.tagName === "IMG") return false;
+  // Don't flatten elements with child elements into plain text
+  if (el.children.length > 0) return false;
   const words = (el.textContent || "").split(/\s+/).filter(Boolean);
   if (words.length < 2) return false;
 
@@ -690,6 +699,12 @@ function insertPageBreakSpacers(
         ) {
           continue; // Re-check same index (now holds the first part)
         }
+      } else if (child.children.length > 0) {
+        // Element has child elements — recurse to paginate its children
+        // instead of flattening it as text.
+        insertPageBreakSpacers(child, pageContentPx);
+        i++;
+        continue;
       } else if (splitTextAtBoundary(child, container, remainingSpace)) {
         continue; // Re-check same index
       }
