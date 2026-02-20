@@ -127,7 +127,11 @@ function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
   const contentWidthMm = opts.pageWidth - opts.margin.left - opts.margin.right;
   const scale = contentWidthMm / renderedWidth;
   const usableHeightMm = opts.pageHeight - opts.margin.top - opts.margin.bottom;
-  const pageContentPx = usableHeightMm / scale;
+  // Floor to integer so page boundaries land on whole CSS pixels.
+  // html2canvas renders at integer-pixel positions; fractional boundaries
+  // cause sub-pixel rounding that accumulates across pages and eventually
+  // cuts through text lines on later pages.
+  const pageContentPx = Math.floor(usableHeightMm / scale);
 
   return { renderedWidth, scale, contentWidthMm, pageContentPx };
 }
@@ -496,7 +500,7 @@ function binarySearchWordFit(
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
     measure.textContent = words.slice(startIndex, mid).join(" ");
-    if (measure.offsetHeight <= maxHeight) {
+    if (measure.getBoundingClientRect().height <= maxHeight) {
       lo = mid;
     } else {
       hi = mid - 1;
@@ -528,6 +532,10 @@ function parseTableStructure(table: HTMLTableElement): {
 /**
  * Split direct-child elements (non-table) that are taller than one page
  * into word-boundary chunks using binary search.
+ *
+ * The original element is kept as a wrapper (preserving its padding,
+ * margin, and other box-model styles) and the chunks are placed inside
+ * it as plain <div> children.
  */
 function splitOversizedText(
   container: HTMLElement,
@@ -545,32 +553,28 @@ function splitOversizedText(
       continue;
     }
 
-    const tag = htmlEl.tagName;
     const styleAttr = htmlEl.getAttribute("style") || "";
     const width = getComputedStyle(htmlEl).width;
     const words = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
 
-    const measure = createMeasureElement(tag, styleAttr, width, container);
+    const measure = createMeasureElement(htmlEl.tagName, styleAttr, width, container);
+    measure.style.padding = "0";
+    measure.style.margin = "0";
 
-    const chunks: HTMLElement[] = [];
     let start = 0;
+    // Clear original content and replace with chunk children.
+    htmlEl.textContent = "";
 
     while (start < words.length) {
       const lo = binarySearchWordFit(measure, words, pageContentPx, start);
 
-      const chunk = document.createElement(tag);
-      chunk.setAttribute("style", styleAttr);
+      const chunk = document.createElement("div");
       chunk.textContent = words.slice(start, lo).join(" ");
-      chunks.push(chunk);
+      htmlEl.appendChild(chunk);
       start = lo;
     }
 
     measure.remove();
-
-    for (const chunk of chunks) {
-      htmlEl.parentNode!.insertBefore(chunk, htmlEl);
-    }
-    htmlEl.remove();
   }
 }
 
@@ -637,14 +641,15 @@ function splitTextAtBoundary(
   const words = (el.textContent || "").split(/\s+/).filter(Boolean);
   if (words.length < 2) return false;
 
-  const tag = el.tagName;
   const styleAttr = el.getAttribute("style") || "";
   const width = getComputedStyle(el).width;
 
-  const measure = createMeasureElement(tag, styleAttr, width, container);
+  const measure = createMeasureElement(el.tagName, styleAttr, width, container);
+  measure.style.padding = "0";
+  measure.style.margin = "0";
 
   measure.textContent = words[0];
-  if (measure.offsetHeight > availableHeight) {
+  if (measure.getBoundingClientRect().height > availableHeight) {
     measure.remove();
     return false;
   }
@@ -655,17 +660,18 @@ function splitTextAtBoundary(
 
   if (lo >= words.length) return false;
 
-  const first = document.createElement(tag);
-  first.setAttribute("style", styleAttr);
+  // Keep the original element as a wrapper (preserving its padding/margin)
+  // and place the two halves inside it as plain <div> children.
+  el.textContent = "";
+
+  const first = document.createElement("div");
   first.textContent = words.slice(0, lo).join(" ");
+  el.appendChild(first);
 
-  const second = document.createElement(tag);
-  second.setAttribute("style", styleAttr);
+  const second = document.createElement("div");
   second.textContent = words.slice(lo).join(" ");
+  el.appendChild(second);
 
-  container.insertBefore(first, el);
-  container.insertBefore(second, el);
-  el.remove();
   return true;
 }
 
@@ -677,15 +683,23 @@ function splitTextAtBoundary(
 function insertPageBreakSpacers(
   container: HTMLElement,
   pageContentPx: number,
+  originY?: number,
 ): void {
+  if (originY === undefined) {
+    originY = container.getBoundingClientRect().top;
+  }
+
   let i = 0;
   while (i < container.children.length) {
     const child = container.children[i] as HTMLElement;
-    const childTop = child.offsetTop;
-    const childBottom = childTop + child.offsetHeight;
-    const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
+    const childRect = child.getBoundingClientRect();
+    const childTop = childRect.top - originY;
+    const childBottom = childRect.bottom - originY;
+    const pageEnd =
+      (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
-    if (childBottom > pageEnd) {
+    // Use a 0.5px tolerance to avoid false positives from sub-pixel rounding
+    if (childBottom > pageEnd + 0.5) {
       const remainingSpace = pageEnd - childTop;
 
       // Try splitting at the boundary first
@@ -702,7 +716,7 @@ function insertPageBreakSpacers(
       } else if (child.children.length > 0) {
         // Element has child elements — recurse to paginate its children
         // instead of flattening it as text.
-        insertPageBreakSpacers(child, pageContentPx);
+        insertPageBreakSpacers(child, pageContentPx, originY);
         i++;
         continue;
       } else if (splitTextAtBoundary(child, container, remainingSpace)) {
@@ -710,9 +724,9 @@ function insertPageBreakSpacers(
       }
 
       // Fallback: push to next page with spacer
-      if (child.offsetHeight <= pageContentPx) {
+      if (childRect.height <= pageContentPx) {
         const spacer = document.createElement("div");
-        spacer.style.height = pageEnd - childTop + 1 + "px";
+        spacer.style.height = Math.ceil(pageEnd - childTop) + "px";
         child.parentNode!.insertBefore(spacer, child);
         i++; // Skip past the spacer
       }
@@ -1381,12 +1395,20 @@ interface PageDimensions {
 function computePageDimensions(
   canvas: HTMLCanvasElement,
   opts: PageOptions,
+  layout: Layout,
+  html2canvasScale: number,
 ): PageDimensions {
   const contentWidthMm = opts.pageWidth - opts.margin.left - opts.margin.right;
   const contentHeightMm =
     opts.pageHeight - opts.margin.top - opts.margin.bottom;
   const contentWidthPx = canvas.width;
-  const contentHeightPx = (contentHeightMm / contentWidthMm) * contentWidthPx;
+  // Use the html2canvas scale parameter directly — NOT canvas.width/renderedWidth.
+  // html2canvas positions content at (cssPosition * scale) in the canvas.
+  // canvas.width = ceil(getBoundingClientRect().width * scale) which can
+  // differ from offsetWidth * scale by 1-2px.  Deriving the scale from
+  // canvas.width introduces a per-page slice error that accumulates and
+  // eventually cuts through text lines on later pages.
+  const contentHeightPx = Math.round(layout.pageContentPx * html2canvasScale);
   const pxPerMm = contentWidthPx / contentWidthMm;
 
   return {
@@ -1488,7 +1510,10 @@ async function generateImagePDF(
 ): Promise<jsPDF> {
   const { imageFormat = "JPEG", imageQuality = 0.7, scale = 3 } = opts;
   const merged = resolveOptions(opts);
-  const { clone, cleanup } = await prepareImageRenderClone(source, merged);
+  const { clone, layout, cleanup } = await prepareImageRenderClone(
+    source,
+    merged,
+  );
 
   try {
     const canvas = await html2canvas(clone, {
@@ -1498,7 +1523,7 @@ async function generateImagePDF(
 
     const { jsPDF: JsPDF } = await import("jspdf");
 
-    const dims = computePageDimensions(canvas, merged);
+    const dims = computePageDimensions(canvas, merged, layout, scale);
     const actualTotalPages = Math.ceil(canvas.height / dims.contentHeightPx);
     const totalPages = resolveTotalPages(
       actualTotalPages,
@@ -1578,7 +1603,10 @@ async function generateImages(
 ): Promise<string[]> {
   const { imageFormat = "PNG", imageQuality = 0.75, scale = 2 } = opts;
   const merged = resolveOptions(opts);
-  const { clone, cleanup } = await prepareImageRenderClone(source, merged);
+  const { clone, layout, cleanup } = await prepareImageRenderClone(
+    source,
+    merged,
+  );
 
   try {
     const canvas = await html2canvas(clone, {
@@ -1586,7 +1614,7 @@ async function generateImages(
       backgroundColor: null,
     });
 
-    const dims = computePageDimensions(canvas, merged);
+    const dims = computePageDimensions(canvas, merged, layout, scale);
     const actualTotalPages = Math.ceil(canvas.height / dims.contentHeightPx);
     const totalPages = resolveTotalPages(
       actualTotalPages,
