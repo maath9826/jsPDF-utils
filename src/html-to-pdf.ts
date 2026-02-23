@@ -498,20 +498,19 @@ function hasPreformattedWhiteSpace(el: HTMLElement): boolean {
   );
 }
 
-/** Binary-search for the maximum segment count (from startIndex) that fits within maxHeight. */
+/** Binary-search for the maximum word count (from startIndex) that fits within maxHeight. */
 function binarySearchWordFit(
   measure: HTMLElement,
   words: string[],
   maxHeight: number,
   startIndex: number,
-  separator = " ",
 ): number {
   let lo = startIndex + 1;
   let hi = words.length;
 
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    measure.textContent = words.slice(startIndex, mid).join(separator);
+    measure.textContent = words.slice(startIndex, mid).join(" ");
     if (measure.getBoundingClientRect().height <= maxHeight) {
       lo = mid;
     } else {
@@ -568,15 +567,11 @@ function splitOversizedText(
     const styleAttr = htmlEl.getAttribute("style") || "";
     const width = getComputedStyle(htmlEl).width;
     const preformatted = hasPreformattedWhiteSpace(htmlEl);
-    let segments: string[];
-    let separator: string;
-    if (preformatted) {
-      segments = (htmlEl.textContent || "").split("\n");
-      separator = "\n";
-    } else {
-      segments = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
-      separator = " ";
-    }
+    // For preformatted text, tokenize into words + \n markers so that
+    // line breaks are preserved while still allowing word-level splitting.
+    const words = preformatted
+      ? (htmlEl.textContent || "").match(/\S+|\n/g) || []
+      : (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
 
     const measure = createMeasureElement(
       htmlEl.tagName,
@@ -591,17 +586,11 @@ function splitOversizedText(
     // Clear original content and replace with chunk children.
     htmlEl.textContent = "";
 
-    while (start < segments.length) {
-      const lo = binarySearchWordFit(
-        measure,
-        segments,
-        pageContentPx,
-        start,
-        separator,
-      );
+    while (start < words.length) {
+      const lo = binarySearchWordFit(measure, words, pageContentPx, start);
 
       const chunk = document.createElement("div");
-      chunk.textContent = segments.slice(start, lo).join(separator);
+      chunk.textContent = words.slice(start, lo).join(" ");
       htmlEl.appendChild(chunk);
       start = lo;
     }
@@ -672,16 +661,12 @@ function splitTextAtBoundary(
   if (el.children.length > 0) return false;
 
   const preformatted = hasPreformattedWhiteSpace(el);
-  let segments: string[];
-  let separator: string;
-  if (preformatted) {
-    segments = (el.textContent || "").split("\n");
-    separator = "\n";
-  } else {
-    segments = (el.textContent || "").split(/\s+/).filter(Boolean);
-    separator = " ";
-  }
-  if (segments.length < 2) return false;
+  // For preformatted text, tokenize into words + \n markers so that
+  // line breaks are preserved while still allowing word-level splitting.
+  const words = preformatted
+    ? (el.textContent || "").match(/\S+|\n/g) || []
+    : (el.textContent || "").split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
 
   const styleAttr = el.getAttribute("style") || "";
   const width = getComputedStyle(el).width;
@@ -690,34 +675,28 @@ function splitTextAtBoundary(
   measure.style.padding = "0";
   measure.style.margin = "0";
 
-  measure.textContent = segments[0];
+  measure.textContent = words[0];
   if (measure.getBoundingClientRect().height > availableHeight) {
     measure.remove();
     return false;
   }
 
-  const lo = binarySearchWordFit(
-    measure,
-    segments,
-    availableHeight,
-    0,
-    separator,
-  );
+  const lo = binarySearchWordFit(measure, words, availableHeight, 0);
 
   measure.remove();
 
-  if (lo >= segments.length) return false;
+  if (lo >= words.length) return false;
 
   // Keep the original element as a wrapper (preserving its padding/margin)
   // and place the two halves inside it as plain <div> children.
   el.textContent = "";
 
   const first = document.createElement("div");
-  first.textContent = segments.slice(0, lo).join(separator);
+  first.textContent = words.slice(0, lo).join(" ");
   el.appendChild(first);
 
   const second = document.createElement("div");
-  second.textContent = segments.slice(lo).join(separator);
+  second.textContent = words.slice(lo).join(" ");
   el.appendChild(second);
 
   return true;
