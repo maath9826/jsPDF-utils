@@ -487,19 +487,31 @@ function createMeasureElement(
   return measure;
 }
 
-/** Binary-search for the maximum word count (from startIndex) that fits within maxHeight. */
+/** Check whether an element uses a white-space mode that preserves newlines. */
+function hasPreformattedWhiteSpace(el: HTMLElement): boolean {
+  const ws = getComputedStyle(el).whiteSpace;
+  return (
+    ws === "pre-line" ||
+    ws === "pre-wrap" ||
+    ws === "pre" ||
+    ws === "break-spaces"
+  );
+}
+
+/** Binary-search for the maximum segment count (from startIndex) that fits within maxHeight. */
 function binarySearchWordFit(
   measure: HTMLElement,
   words: string[],
   maxHeight: number,
   startIndex: number,
+  separator = " ",
 ): number {
   let lo = startIndex + 1;
   let hi = words.length;
 
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    measure.textContent = words.slice(startIndex, mid).join(" ");
+    measure.textContent = words.slice(startIndex, mid).join(separator);
     if (measure.getBoundingClientRect().height <= maxHeight) {
       lo = mid;
     } else {
@@ -555,9 +567,23 @@ function splitOversizedText(
 
     const styleAttr = htmlEl.getAttribute("style") || "";
     const width = getComputedStyle(htmlEl).width;
-    const words = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
+    const preformatted = hasPreformattedWhiteSpace(htmlEl);
+    let segments: string[];
+    let separator: string;
+    if (preformatted) {
+      segments = (htmlEl.textContent || "").split("\n");
+      separator = "\n";
+    } else {
+      segments = (htmlEl.textContent || "").split(/\s+/).filter(Boolean);
+      separator = " ";
+    }
 
-    const measure = createMeasureElement(htmlEl.tagName, styleAttr, width, container);
+    const measure = createMeasureElement(
+      htmlEl.tagName,
+      styleAttr,
+      width,
+      container,
+    );
     measure.style.padding = "0";
     measure.style.margin = "0";
 
@@ -565,11 +591,17 @@ function splitOversizedText(
     // Clear original content and replace with chunk children.
     htmlEl.textContent = "";
 
-    while (start < words.length) {
-      const lo = binarySearchWordFit(measure, words, pageContentPx, start);
+    while (start < segments.length) {
+      const lo = binarySearchWordFit(
+        measure,
+        segments,
+        pageContentPx,
+        start,
+        separator,
+      );
 
       const chunk = document.createElement("div");
-      chunk.textContent = words.slice(start, lo).join(" ");
+      chunk.textContent = segments.slice(start, lo).join(separator);
       htmlEl.appendChild(chunk);
       start = lo;
     }
@@ -638,8 +670,18 @@ function splitTextAtBoundary(
   if (el.tagName === "TABLE" || el.tagName === "IMG") return false;
   // Don't flatten elements with child elements into plain text
   if (el.children.length > 0) return false;
-  const words = (el.textContent || "").split(/\s+/).filter(Boolean);
-  if (words.length < 2) return false;
+
+  const preformatted = hasPreformattedWhiteSpace(el);
+  let segments: string[];
+  let separator: string;
+  if (preformatted) {
+    segments = (el.textContent || "").split("\n");
+    separator = "\n";
+  } else {
+    segments = (el.textContent || "").split(/\s+/).filter(Boolean);
+    separator = " ";
+  }
+  if (segments.length < 2) return false;
 
   const styleAttr = el.getAttribute("style") || "";
   const width = getComputedStyle(el).width;
@@ -648,28 +690,34 @@ function splitTextAtBoundary(
   measure.style.padding = "0";
   measure.style.margin = "0";
 
-  measure.textContent = words[0];
+  measure.textContent = segments[0];
   if (measure.getBoundingClientRect().height > availableHeight) {
     measure.remove();
     return false;
   }
 
-  const lo = binarySearchWordFit(measure, words, availableHeight, 0);
+  const lo = binarySearchWordFit(
+    measure,
+    segments,
+    availableHeight,
+    0,
+    separator,
+  );
 
   measure.remove();
 
-  if (lo >= words.length) return false;
+  if (lo >= segments.length) return false;
 
   // Keep the original element as a wrapper (preserving its padding/margin)
   // and place the two halves inside it as plain <div> children.
   el.textContent = "";
 
   const first = document.createElement("div");
-  first.textContent = words.slice(0, lo).join(" ");
+  first.textContent = segments.slice(0, lo).join(separator);
   el.appendChild(first);
 
   const second = document.createElement("div");
-  second.textContent = words.slice(lo).join(" ");
+  second.textContent = segments.slice(lo).join(separator);
   el.appendChild(second);
 
   return true;
@@ -695,8 +743,7 @@ function insertPageBreakSpacers(
     const childRect = child.getBoundingClientRect();
     const childTop = childRect.top - originY;
     const childBottom = childRect.bottom - originY;
-    const pageEnd =
-      (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
+    const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
     // Use a 0.5px tolerance to avoid false positives from sub-pixel rounding
     if (childBottom > pageEnd + 0.5) {
