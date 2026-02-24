@@ -6,8 +6,10 @@ Utilities for rendering HTML into paginated PDF output with `jsPDF` and
 ## Installation
 
 ```bash
-npm install jspdf-utils jspdf html2canvas-pro
+npm install jspdf-utils
 ```
+
+`jspdf` and `html2canvas-pro` are peer dependencies and will be installed automatically.
 
 ## Exported API
 
