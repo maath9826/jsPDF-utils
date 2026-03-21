@@ -6,7 +6,7 @@
  */
 
 import html2canvas from "html2canvas-pro";
-import type { jsPDF } from "jspdf";
+import jsPDF from "jspdf-with-html2canvas-pro";
 
 export interface Margin {
   top: number;
@@ -1547,7 +1547,7 @@ async function generateImagePDF(
       backgroundColor: null,
     });
 
-    const { jsPDF: JsPDF } = await import("jspdf");
+    const { jsPDF: JsPDF } = await import("jspdf-with-html2canvas-pro");
 
     const dims = computePageDimensions(canvas, merged, layout, scale);
     const actualTotalPages = Math.ceil(canvas.height / dims.contentHeightPx);
