@@ -5,7 +5,7 @@
  * via jsPDF's doc.html() renderer.
  */
 
-import html2canvas from "html2canvas-pro";
+import html2canvas, { type Options as Html2CanvasOptions } from "html2canvas-pro";
 import jsPDF from "jspdf-with-html2canvas-pro";
 
 export interface Margin {
@@ -802,7 +802,11 @@ async function generatePDF(
   opts: PageOptionsInput &
     Pick<
       ImagePDFOptions,
-      "marginContent" | "forcedPageCount" | "textBorder" | "border"
+      | "marginContent"
+      | "forcedPageCount"
+      | "textBorder"
+      | "border"
+      | "html2canvasOptions"
     > = {},
 ): Promise<jsPDF> {
   const { clone, layout, options, cleanup } = prepare(source, opts);
@@ -820,6 +824,10 @@ async function generatePDF(
           options.margin.bottom,
           options.margin.left,
         ],
+        // jspdf's bundled html2canvas type is older than html2canvas-pro's
+        // (e.g. onclone signature differs). The runtime call forwards
+        // identically, so cast through unknown.
+        html2canvas: opts.html2canvasOptions as never,
       });
     });
   } finally {
@@ -913,6 +921,13 @@ export interface ImagePDFOptions {
    * Example: 1 means only page 1 is generated/exported.
    */
   forcedPageCount?: number;
+  /**
+   * Options forwarded directly to html2canvas-pro. Anything supported by
+   * html2canvas (e.g. `foreignObjectRendering`, `useCORS`, `proxy`,
+   * `windowWidth`, `logging`) can be set here. Note that `scale` and
+   * `backgroundColor` are controlled by this library and will be overridden.
+   */
+  html2canvasOptions?: Partial<Html2CanvasOptions>;
 }
 
 function normalizeForcedPageCount(
@@ -1543,6 +1558,7 @@ async function generateImagePDF(
 
   try {
     const canvas = await html2canvas(clone, {
+      ...opts.html2canvasOptions,
       scale,
       backgroundColor: null,
     });
@@ -1636,6 +1652,7 @@ async function generateImages(
 
   try {
     const canvas = await html2canvas(clone, {
+      ...opts.html2canvasOptions,
       scale,
       backgroundColor: null,
     });
