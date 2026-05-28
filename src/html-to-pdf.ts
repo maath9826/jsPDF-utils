@@ -924,6 +924,17 @@ export interface ImagePDFOptions {
    */
   forcedPageCount?: number;
   /**
+   * Fill color painted behind every page before the content slice and
+   * margin content are drawn. Any CSS color string the canvas accepts works
+   * (hex, rgb(), hsl(), oklch(), …). Defaults to white (`#ffffff`).
+   *
+   * Because the content slice and margin content are rasterized on a
+   * transparent background, this color shows through wherever they don't
+   * paint their own background — so a single `pageBackground` can give the
+   * whole sheet a uniform paper color without setting it on each element.
+   */
+  pageBackground?: string;
+  /**
    * Options forwarded directly to html2canvas-pro. Anything supported by
    * html2canvas (e.g. `foreignObjectRendering`, `useCORS`, `proxy`,
    * `windowWidth`, `logging`) can be set here. Note that `scale` and
@@ -1477,6 +1488,7 @@ function createPageSliceCanvas(
   sourceCanvas: HTMLCanvasElement,
   pageIndex: number,
   dims: PageDimensions,
+  pageBackground = "#ffffff",
 ): {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -1494,7 +1506,7 @@ function createPageSliceCanvas(
   const ctx = pageCanvas.getContext("2d");
   if (!ctx) throw new Error("Could not get canvas context");
 
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = pageBackground;
   ctx.fillRect(0, 0, dims.pageWidthPx, dims.pageHeightPx);
 
   return { canvas: pageCanvas, ctx, sliceHeight };
@@ -1595,7 +1607,7 @@ async function generateImagePDF(
         canvas: pageCanvas,
         ctx,
         sliceHeight,
-      } = createPageSliceCanvas(canvas, i, dims);
+      } = createPageSliceCanvas(canvas, i, dims, opts.pageBackground);
 
       if (marginContent || textBorder || border) {
         await drawMarginContentOnCanvas(
@@ -1682,7 +1694,7 @@ async function generateImages(
         canvas: pageCanvas,
         ctx,
         sliceHeight,
-      } = createPageSliceCanvas(canvas, i, dims);
+      } = createPageSliceCanvas(canvas, i, dims, opts.pageBackground);
 
       if (marginContent || textBorder || border) {
         await drawMarginContentOnCanvas(
