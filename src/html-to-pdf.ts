@@ -5,7 +5,9 @@
  * via jsPDF's doc.html() renderer.
  */
 
-import html2canvas, { type Options as Html2CanvasOptions } from "html2canvas-pro";
+import html2canvas, {
+  type Options as Html2CanvasOptions,
+} from "html2canvas-pro";
 import jsPDF from "jspdf-with-html2canvas-pro";
 
 export interface Margin {
@@ -1107,10 +1109,15 @@ async function preRenderStaticSlots(
       if (rect.width <= 0 || rect.height <= 0) continue;
       const el = resolveMarginResult(val);
       if (el) {
+        // Pass the resolved element straight through. `renderSlotToCanvas`
+        // clones it internally (so the caller's original is never moved out
+        // of the DOM) and snapshots its computed styles — but only when the
+        // element it receives is still connected. Pre-cloning here with
+        // `val.cloneNode(true)` produced a *disconnected* node, which made
+        // that `isConnected` guard fail and the style snapshot get skipped,
+        // so a styled HTMLElement margin slot rendered completely unstyled.
         cache[slot] = await renderSlotToCanvas(
-          val instanceof HTMLElement
-            ? (val.cloneNode(true) as HTMLElement)
-            : el,
+          el,
           rect.width,
           rect.height,
           scale,

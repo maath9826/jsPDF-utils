@@ -137,33 +137,8 @@
       <div style="font-weight: bold; position: relative; overflow: visible">
         <div style="position: relative; min-height: 60px">
           <div>التوقيع:</div>
-          <img
-            src="/images/AhmedMohammedMhoder.png"
-            style="
-              width: 224px;
-              height: auto;
-              max-height: 130px;
-              object-fit: contain;
-              position: absolute;
-              top: -30px;
-            "
-            alt="signature"
-          />
         </div>
         <div>اسم المستلم: احمد محمد مهودر</div>
-
-        <img
-          src="/images/Mark.png"
-          style="
-            width: 224px;
-            height: auto;
-            position: absolute;
-            right: 50%;
-            top: -30px;
-            transform: translateX(50%);
-          "
-          alt="signature"
-        />
       </div>
     </div>
 
@@ -173,7 +148,7 @@
         generatePDF,
         previewImages,
       } from "./src/html-to-pdf.js";
-      import { jsPDF } from "jspdf";
+      import { jsPDF } from "jspdf-with-html2canvas-pro";
       const RECEIPT_DATA = {
         number: 111008194,
         createdAt: "2026-01-20T12:37:14.692405Z",
