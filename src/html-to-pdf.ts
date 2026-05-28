@@ -1708,6 +1708,15 @@ async function generateImages(
   }
 }
 
+export interface PreviewOptions {
+  /**
+   * Height of the preview container. A number is treated as pixels;
+   * a string is used verbatim (e.g. "400px", "60vh", "30rem").
+   * Defaults to one full page height (`pageHeight` in mm).
+   */
+  containerHeight?: number | string;
+}
+
 /**
  * Render an HTML element as page images and inject them into a scrollable
  * container. Each image is sized to match the page format dimensions.
@@ -1715,10 +1724,17 @@ async function generateImages(
 async function previewImages(
   source: HTMLElement,
   container: HTMLElement,
-  opts: PageOptionsInput & ImagePDFOptions = {},
+  opts: PageOptionsInput & ImagePDFOptions & PreviewOptions = {},
 ): Promise<void> {
   const merged = resolveOptions(opts);
   const images = await generateImages(source, opts);
+
+  const containerHeight =
+    opts.containerHeight == null
+      ? merged.pageHeight + "mm"
+      : typeof opts.containerHeight === "number"
+        ? opts.containerHeight + "px"
+        : opts.containerHeight;
 
   container.innerHTML = "";
   Object.assign(container.style, {
@@ -1726,9 +1742,12 @@ async function previewImages(
     flexDirection: "column",
     direction: "ltr",
     width: "fit-content",
-    height: merged.pageHeight + "mm",
-    maxHeight: "100vh",
-    overflowY: images.length > 1 ? "auto" : "hidden",
+    height: containerHeight,
+    maxHeight: containerHeight,
+    // When the caller fixes the height, content may overflow even with a
+    // single page, so always allow scrolling in that case.
+    overflowY:
+      opts.containerHeight != null || images.length > 1 ? "auto" : "hidden",
     background: "#e0e0e0",
   });
 
