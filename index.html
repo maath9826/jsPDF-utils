@@ -3,142 +3,329 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>js-pdf-utils</title>
+    <title>js-pdf-utils — invoice repro</title>
     <style>
       body {
         font-family: system-ui, sans-serif;
-        max-width: 720px;
-        margin: 2rem auto;
+        margin: 1rem;
         line-height: 1.6;
       }
-
       button {
-        padding: 0.75rem 1.5rem;
+        padding: 0.6rem 1.2rem;
         font-size: 1rem;
         cursor: pointer;
+      }
+      /* The page the invoice lives on, mimicking china-dash /invoice-preview */
+      #stage {
+        background: #525659;
+        padding: 24px;
+        display: flex;
+        justify-content: center;
+        margin-top: 1rem;
       }
     </style>
   </head>
   <body>
-    <h1>doc.html() Renderer Test</h1>
+    <h1>Invoice page-break repro</h1>
     <p>
-      Click the button below to render the HTML element below directly to PDF
-      using <code>doc.html()</code> with Arabic text reshaping.
+      Hard-coded copy of china-dash <code>InvoiceDocument</code>. Click to render
+      it to PDF via <code>generatePDF</code> (same path the app uses). Watch the
+      console for the page-break / split calculation logs.
     </p>
     <button id="generate-html">Generate PDF (doc.html)</button>
-    <button id="generate-html-2">Generate PDF image</button>
+    <button id="generate-image">Generate image PDF</button>
     <button id="preview-images">Preview as images</button>
     <div id="preview-container"></div>
-    <div
-      id="print-section"
-      dir="rtl"
-      lang="ar"
-      style="text-align: right; direction: rtl; font-family: Arial, sans-serif"
-    >
-      <h2 style="margin: 0">نموذج مستند عربي</h2>
-      <p style="margin: 0">
-        العام الدراسي <strong>2019-2020</strong> كان مميزاً
-      </p>
-      <p style="margin: 0">من 2019-2020 إلى 2023-2024 شهدنا تطوراً كبيراً</p>
-      <p style="margin: 0">اتصل على الرقم +964-770-123-4567 أو 0771-234-5678</p>
-      <p style="margin: 0">
-        جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام الدراسي 2019-2020
-        تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية
-        مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش
-        وانطلقت في مسيرتها التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة
-        عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام
-        الدراسي 2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في
-        مسيرتها التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من
-        الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام الدراسي
-        2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها
-        التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من الكليات
-        جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام الدراسي 2019-2020
-        تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية
-        مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش
-        وانطلقت في مسيرتها التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة
-        عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام
-        الدراسي 2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في
-        مسيرتها التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من
-        الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام الدراسي
-        2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها
-        التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من الكليات
-        مسيرتها التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من
-        الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام الدراسي
-        2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها
-        التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من الكليات
-        مسيرتها التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من
-        الكليات جامعة كلكامش وانطلقت في مسيرتها التعليمية مطلع العام الدراسي
-        2019-2020 تضم الجامعة عدداً من الكليات جامعة كلكامش وانطلقت في مسيرتها
-        التعليمية مطلع العام الدراسي 2019-2020 تضم الجامعة عدداً من الكليات
-      </p>
-      <table
-        border="1"
-        cellpadding="4"
-        style="border-collapse: collapse; width: 100%; text-align: right"
+
+    <div id="stage">
+      <!--
+        #print-section mirrors china-dash InvoiceDocument:
+        - root keeps a fixed 758px design width (jspdf clones it to full page
+          width; inner blocks are fluid % so they fill the page)
+        - dir="rtl" because the app document is RTL
+      -->
+      <div
+        id="print-section"
+        dir="rtl"
+        lang="ar"
+        style="
+          width: 758px;
+          background: #ffffff;
+          color: #111111;
+          font-family: Arial, sans-serif;
+          box-sizing: border-box;
+        "
       >
-        <tr>
-          <td>فاطمة علي</td>
-          <td>20/06/2015</td>
-          <td>88</td>
-        </tr>
-        <tr>
-          <td>أحمد محمد</td>
-          <td>15/05/1990</td>
-          <td>95</td>
-        </tr>
-        <tr>
-          <td>فاطمة علي</td>
-          <td>20/06/2015</td>
-          <td>88</td>
-        </tr>
-      </table>
-      <table
-        border="1"
-        cellpadding="4"
-        style="border-collapse: collapse; width: 100%; text-align: right"
-      >
-        <tr>
-          <td>فاطمة علي</td>
-          <td>20/06/2015</td>
-          <td>88</td>
-        </tr>
-        <tr>
-          <td>أحمد محمد</td>
-          <td>15/05/1990</td>
-          <td>95</td>
-        </tr>
-        <tr>
-          <td>فاطمة علي</td>
-          <td>20/06/2015</td>
-          <td>88</td>
-        </tr>
-      </table>
-      <table
-        border="1"
-        cellpadding="4"
-        style="border-collapse: collapse; width: 100%; text-align: right"
-      >
-        <tr>
-          <td>فاطمة علي</td>
-          <td>20/06/2015</td>
-          <td>88</td>
-        </tr>
-        <tr>
-          <td>أحمد محمد</td>
-          <td>15/05/1990</td>
-          <td>95</td>
-        </tr>
-        <tr>
-          <td>فاطمة علي</td>
-          <td>20/06/2015</td>
-          <td>88</td>
-        </tr>
-      </table>
-      <div style="font-weight: bold; position: relative; overflow: visible">
-        <div style="position: relative; min-height: 60px">
-          <div>التوقيع:</div>
+        <!-- ===== Company header ===== -->
+        <div style="width: 100%; margin-bottom: 12px">
+          <!-- Top row: English (left) + Chinese (right) -->
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+            "
+          >
+            <div
+              style="
+                font-family: Arial, sans-serif;
+                font-size: 30px;
+                font-weight: 700;
+                color: #15263b;
+                text-align: left;
+                line-height: 1.25;
+              "
+            >
+              Yiwu Yisheng Trading Co., Ltd.
+            </div>
+            <img
+              src="./images/cn-name.png"
+              alt=""
+              style="height: 40px; width: auto; object-fit: contain"
+            />
+          </div>
+
+          <!-- Arabic company name — centered full width -->
+          <div
+            dir="rtl"
+            style="
+              width: 100%;
+              font-family: Arial, sans-serif;
+              font-size: 34px;
+              font-weight: 700;
+              color: #15263b;
+              text-align: center;
+              line-height: 1.2;
+              margin-top: 8px;
+              margin-bottom: 14px;
+            "
+          >
+            شركة صرح الجنوب للتجارة العامة
+          </div>
+
+          <!-- Main row: address/phones (left) + logo (right) -->
+          <div
+            style="display: flex; gap: 16px; align-items: center; margin-top: 8px"
+          >
+            <div
+              style="
+                flex: 1 1 auto;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+              "
+            >
+              <div
+                dir="rtl"
+                style="
+                  font-family: Arial, sans-serif;
+                  font-size: 16px;
+                  font-weight: 700;
+                  color: #1c1c1c;
+                  text-align: right;
+                  line-height: 1.5;
+                  margin-bottom: 4px;
+                "
+              >
+                بغداد - الشورجة - عمارة روز الطابق الثاني - محلات فارس الفتلاوي
+              </div>
+              <div
+                dir="rtl"
+                style="
+                  font-family: Arial, sans-serif;
+                  font-size: 16px;
+                  font-weight: 700;
+                  color: #1c1c1c;
+                  text-align: right;
+                  line-height: 1.5;
+                  margin-bottom: 4px;
+                "
+              >
+                بغداد - الوزيرية الصناعية - مجمع راميتا - مجاور جامع الملا حويش -
+                محلات فارس الفتلاوي
+              </div>
+              <div
+                style="
+                  font-family: Arial, sans-serif;
+                  font-size: 13px;
+                  font-weight: 700;
+                  color: #1c1c1c;
+                  text-align: right;
+                  direction: ltr;
+                  line-height: 1.62;
+                  margin-top: 6px;
+                "
+              >
+                <div>+964 780 762 9010</div>
+                <div>+964 787 858 5852</div>
+                <div>+964 770 739 7394</div>
+                <div>+964 770 634 3017</div>
+              </div>
+            </div>
+            <img
+              src="./images/newLogo.png"
+              alt=""
+              style="flex: 0 0 200px; width: 200px; height: 200px; object-fit: contain"
+            />
+          </div>
         </div>
-        <div>اسم المستلم: احمد محمد مهودر</div>
+
+        <!-- ===== Customer info table ===== -->
+        <table
+          style="width: 100%; border-collapse: collapse; table-layout: fixed"
+        >
+          <colgroup>
+            <col style="width: 78.8918%" />
+            <col style="width: 21.1082%" />
+          </colgroup>
+          <tbody>
+            <tr style="height: 31px; background: #f2f2f2">
+              <td style="border: 0.5px solid #000; text-align: center; font-size: 13px; color: #111">
+                <span style="font-family: Arial, sans-serif; font-weight: 700">cartest</span>
+              </td>
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #111">Carrier Line</td>
+            </tr>
+            <tr style="height: 31px; background: #ffffff">
+              <td style="border: 0.5px solid #000; text-align: center; font-size: 13px; color: #111">
+                <span style="font-family: Arial, sans-serif; font-weight: 700">27/06/2026</span>
+              </td>
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #111">Date</td>
+            </tr>
+            <tr style="height: 31px; background: #f2f2f2">
+              <td style="border: 0.5px solid #000; text-align: center; font-size: 13px; color: #111">
+                <span style="font-family: Arial, sans-serif; font-weight: 700">1223</span>
+              </td>
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #111">Customer Code</td>
+            </tr>
+            <tr style="height: 31px; background: #ffffff">
+              <td style="border: 0.5px solid #000; text-align: center; font-size: 13px; color: #111">
+                <span style="font-family: Arial, sans-serif; font-weight: 700"></span>
+              </td>
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #111">Customer LOGO</td>
+            </tr>
+            <tr style="height: 31px; background: #f2f2f2">
+              <td style="border: 0.5px solid #000; text-align: center; font-size: 13px; color: #111">
+                <span style="font-family: Arial, sans-serif; font-weight: 700">james</span>
+              </td>
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #111">Customer Name</td>
+            </tr>
+            <tr style="height: 31px; background: #ffffff">
+              <td style="border: 0.5px solid #000; text-align: center; font-size: 13px; color: #111">
+                <span dir="rtl" style="font-family: Arial, sans-serif; font-weight: 700">address 0 0 1123</span>
+              </td>
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #111">Address</td>
+            </tr>
+            <tr style="height: 31px; background: #f2f2f2">
+              <td style="border: 0.5px solid #000; text-align: center; font-size: 13px; color: #111">
+                <span style="font-family: Arial, sans-serif; font-weight: 700">07283203</span>
+              </td>
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 12.5px; font-weight: 700; color: #111">Contact No</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- ===== Products table ===== -->
+        <table
+          style="width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 2px"
+        >
+          <colgroup>
+            <col style="width: 31.1346%" />
+            <col style="width: 17.5462%" />
+            <col style="width: 10.4222%" />
+            <col style="width: 8.8390%" />
+            <col style="width: 11.2137%" />
+            <col style="width: 14.6438%" />
+            <col style="width: 6.2005%" />
+          </colgroup>
+          <thead>
+            <tr style="height: 49px; background: #ffff00">
+              <th style="border: 0.5px solid #000; background: #ffff00; padding: 2px">
+                <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; color: #111">ملاحظات</div>
+                <div style="font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #111">INFO</div>
+              </th>
+              <th style="border: 0.5px solid #000; background: #ffff00; padding: 2px">
+                <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; color: #111">التفاصيل</div>
+                <div style="font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #111">DESCRIPTION</div>
+              </th>
+              <th style="border: 0.5px solid #000; background: #ffff00; padding: 2px">
+                <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; color: #111">المجموع USD</div>
+                <div style="font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #111">AMOUNT USD</div>
+              </th>
+              <th style="border: 0.5px solid #000; background: #ffff00; padding: 2px">
+                <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; color: #111">السعر $ USD</div>
+                <div style="font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #111">PRICE USD</div>
+              </th>
+              <th style="border: 0.5px solid #000; background: #ffff00; padding: 2px">
+                <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; color: #111">عدد القطع</div>
+                <div style="font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #111">PCS</div>
+              </th>
+              <th style="border: 0.5px solid #000; background: #ffff00; padding: 2px">
+                <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; color: #111">الصورة</div>
+                <div style="font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #111">PHOTO</div>
+              </th>
+              <th style="border: 0.5px solid #000; background: #ffff00; padding: 2px">
+                <div dir="rtl" style="font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; color: #111">ت</div>
+                <div style="font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; color: #111">NO</div>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="products-body">
+            <!-- product rows injected by script -->
+          </tbody>
+        </table>
+
+        <!-- ===== Totals ===== -->
+        <table
+          style="width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 20px"
+        >
+          <colgroup>
+            <col style="width: 78.8918%" />
+            <col style="width: 21.1082%" />
+          </colgroup>
+          <tbody>
+            <tr style="height: 28px; background: #ffffff">
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 13.5px; font-weight: 500; color: #111">8</td>
+              <td style="border: 0.5px solid #000; padding: 0 12px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 500; color: #111">Total PCS</td>
+            </tr>
+            <tr style="height: 28px; background: #ffffff">
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 13.5px; font-weight: 500; color: #111">$390.00</td>
+              <td style="border: 0.5px solid #000; padding: 0 12px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 500; color: #111">Shipping Cost</td>
+            </tr>
+            <tr style="height: 28px; background: #ffffff">
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #111">$1,600.00</td>
+              <td style="border: 0.5px solid #000; padding: 0 12px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 700; color: #111">Total</td>
+            </tr>
+            <tr style="height: 28px; background: #ffffff">
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 13.5px; font-weight: 500; color: #111">$48.00</td>
+              <td style="border: 0.5px solid #000; padding: 0 12px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 500; color: #111">Company 3%</td>
+            </tr>
+            <tr style="height: 28px; background: #ffff00">
+              <td style="border: 0.5px solid #000; text-align: center; font-family: Arial, sans-serif; font-size: 13.5px; font-weight: 700; color: #111">$1,648.00</td>
+              <td style="border: 0.5px solid #000; padding: 0 12px; font-family: Arial, sans-serif; font-size: 13px; font-weight: 700; color: #111">Total Amount</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- ===== Terms & conditions (the section being cut) ===== -->
+        <div style="width: 100%; margin-top: 24px">
+          <div
+            dir="rtl"
+            style="
+              font-family: Arial, sans-serif;
+              font-size: 16px;
+              font-weight: 700;
+              color: #15263b;
+              text-align: right;
+              border-bottom: 2px solid #15263b;
+              padding-bottom: 6px;
+              margin-bottom: 12px;
+            "
+          >
+            شروط وأحكام الخدمة
+          </div>
+          <div id="terms-list"><!-- term rows injected by script --></div>
+        </div>
       </div>
     </div>
 
@@ -149,140 +336,113 @@
         previewImages,
       } from "./src/html-to-pdf.js";
       import { jsPDF } from "jspdf-with-html2canvas-pro";
-      const RECEIPT_DATA = {
-        number: 111008194,
-        createdAt: "2026-01-20T12:37:14.692405Z",
-        year: 2025,
-        month: 12,
-        fromYear: 2025,
-        fromMonth: 1,
-        companyName: "مكتب بلسم الحياة العلمي لدعاية الادوية",
-        registrationNumber: "1111097450",
-        total: 2763172,
-        rnn: "000658139832",
-        resolvedAt: "2026-01-20T15:14:23.206Z",
-        subval: 2509200,
-        subvalType: "POS ONLINE",
-        subval2: 0,
-        subvalType2: "POS ONLINE",
-        forval1: 125460,
-        forval1Type: "POS ONLINE",
-        forval12: 0,
-        forval1Type2: "POS ONLINE",
-        forval2: 0,
-        forval2Type: "POS ONLINE",
-        forval22: 0,
-        forval2Type2: "POS ONLINE",
-        servicefees: 92213,
-        servicefeesType: "POS ONLINE",
-        servicefees2: 0,
-        servicefeesType2: "POS ONLINE",
-        inquiryfees: 0,
-        inquiryfeesType: "POS ONLINE",
-        inquiryfees2: 0,
-        inquiryfeesType2: "POS ONLINE",
-        yearlyfees: 25000,
-        yearlyfeesType: "POS ONLINE",
-        yearlyfees2: 0,
-        yearlyfeesType2: "POS ONLINE",
-        paymentfees: 10000,
-        savings: 1299,
-        savingsGate: "492 ايرادات عرضية",
-        savingsType: "POS ONLINE",
-        managerName: "احمد محمد مهودر",
-        managerSigniture: "AhmedMohammedMhoder.png",
-      };
 
-      export function convertDateFormat(dateString) {
-        if (!dateString) return null;
+      // --- Hard-coded invoice data (mirrors china-dash seed) ---
+      const PHONE_THUMB =
+        "data:image/svg+xml;charset=utf-8," +
+        encodeURIComponent(
+          "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><rect width='200' height='200' fill='#5B7CC9'/></svg>",
+        );
 
-        const date = new Date(dateString);
-        const options = {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        };
+      const PRODUCTS = [
+        { no: 1, qty: 2, price: "$100.00", amount: "$200.00", desc: "", info: "test" },
+      ];
 
-        return date.toLocaleString("en-CA", options);
+      const AR_NUM = ["١", "٢", "٣", "٤", "٥", "٦"];
+      const TERMS = [
+        "يقتصر دور الشركة (صرح الجنوب) على البحث عن المنتجات وشرائها وفحصها نيابةً عن الزبون فقط، ولا تعد طرفاً في عمليات الشحن أو التخليص الجمركي، وتنتهي مسؤولية الشركة (صرح الجنوب) بالكامل بعد تسليم البضاعة إلى شركة الشحن.",
+        "تستغرق مدة تجهيز وفحص البضائع بعد استلام المبلغ مدة أقصاها (10) أيام عمل، وبعد الانتهاء يتم تسليم البضائع إلى شركة الشحن. يتم توثيق جميع مراحل الفحص والتجهيز والتسليم (صور أو فيديو) وإرسالها للزبون، ويُعد هذا التوثيق إثباتاً لحالة البضاعة قبل الشحن.",
+        "نتحمّل المسؤولية عن البضائع داخل أراضي جمهورية الصين وخلال مرحلة التجهيز والفحص فقط.",
+        "لا تتحمل الشركة (صرح الجنوب) أي مسؤولية عن أي أضرار أو مشاكل أو تأخير أو غرامات أو مصادرة قد تحدث أثناء الشحن أو التخليص خارج أراضي جمهورية الصين، ولا تتحمل أي مسؤولية عن التأخير الناتج عن ظروف خارجة عن الإرادة مثل الأحوال الجوية أو القرارات الحكومية أو مشاكل الموانئ والنقل.",
+        "يتم اختيار شركة الشحن من قبل الزبون، وفي حال عدم توفرها نقوم بالاختيار بالنيابة عنه دون تحمّل أي مسؤولية قانونية أو مالية.",
+        "يُعدّ دفع المبلغ موافقةً نهائية من الزبون على جميع هذه الشروط دون أي اعتراض لاحق.",
+      ];
+
+      const prodCellBase =
+        "border:0.5px solid #000; text-align:center; color:#111; font-family:Arial,sans-serif;";
+
+      function buildProducts() {
+        const body = document.getElementById("products-body");
+        body.innerHTML = PRODUCTS.map((p) => {
+          const desc = p.desc
+            ? `<div dir="${/[؀-ۿ]/.test(p.desc) ? "rtl" : "ltr"}" style="font-family:Arial,sans-serif; font-size:11px; font-weight:500; line-height:1.55; color:#111; text-align:center; white-space:pre-wrap">${p.desc}</div>`
+            : "";
+          const info = p.info
+            ? `<div dir="${/[؀-ۿ]/.test(p.info) ? "rtl" : "ltr"}" style="font-family:Arial,sans-serif; font-size:13px; font-weight:600; color:#111; white-space:pre-wrap">${p.info}</div>`
+            : "";
+          return `
+            <tr style="height:97px">
+              <td style="border:0.5px solid #000; text-align:center">${info}</td>
+              <td style="border:0.5px solid #000; text-align:center; padding:4px">${desc}</td>
+              <td style="${prodCellBase} font-size:13px; font-weight:600">${p.amount}</td>
+              <td style="${prodCellBase} font-size:13px">${p.price}</td>
+              <td style="${prodCellBase} font-size:14px; font-weight:500">${p.qty}</td>
+              <td style="${prodCellBase} padding:3px"><img src="${PHONE_THUMB}" alt="" style="max-width:100px; max-height:88px; object-fit:contain; display:block; margin:0 auto" /></td>
+              <td style="${prodCellBase} font-size:13px; font-weight:600">${p.no}</td>
+            </tr>`;
+        }).join("");
       }
 
-      const pdfOptions = {
-        format: "a5",
-        margin: { top: 0, bottom: 0, left: 12, right: 12 },
-        // textBorder: {
-        //   text: `اسم المشروع ${RECEIPT_DATA.companyName} - وصل قبض - تاريخ الوصل ${convertDateFormat(RECEIPT_DATA.createdAt)} - مبلغ الوصل الكلي ${RECEIPT_DATA.total.toLocaleString()} - رقم الوصل ${RECEIPT_DATA.number} - `,
-        //   fontSize: 2,
-        //   margin: 6,
-        //   fontWeight: "bold",
-        // },
-        // border: {
-        //   color: "#000",
-        //   width: 1,
-        //   margin: 4,
-        // },
-      };
+      function buildTerms() {
+        const list = document.getElementById("terms-list");
+        list.innerHTML = TERMS.map(
+          (text, i) => `
+          <div dir="rtl" style="display:flex; flex-direction:row; gap:8px; margin-bottom:10px; font-family:Arial,sans-serif; font-size:11.5px; line-height:1.7; color:#222; text-align:right">
+            <div style="flex:0 0 auto; font-weight:700; color:#15263b">${AR_NUM[i]} -</div>
+            <div style="flex:1 1 auto">${text}</div>
+          </div>`,
+        ).join("");
+      }
 
-      const marginContent = {
-        top: (page, total) => {
-          const el = document.createElement("div");
-          el.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:6mm 10mm 0; font-family:Arial,sans-serif; font-size:9px; color:#000;">
-              <span>Gilgamesh University</span>
-              <span>Academic Year 2019-2020</span>
-            </div>
-            <div style="border-bottom:1px solid #000; margin:2mm 10mm 0;"></div>
-          `;
-          return el;
-        },
-        bottom: (page, total) => {
-          const el = document.createElement("div");
-          el.innerHTML = `
-            <div style="display:flex; flex-direction:column; align-items:center; padding:0 10mm; font-family:Arial,sans-serif; font-size:8px; color:#000; position:absolute; bottom:6mm; left:0; right:0;">
-              <div style="border-top:1px solid #ccc; width:calc(100% - 20mm); margin-bottom:2mm;"></div>
-              <span>Page ${page} of ${total}</span>
-            </div>
-          `;
-          return el;
+      buildProducts();
+      buildTerms();
+
+      // --- PDF options matching china-dash use-pdf-export.ts ---
+      // 24px L/R, 46px T/B, converted to mm at 96dpi.
+      const PX_TO_MM = 25.4 / 96;
+      const pdfOpts = {
+        format: "a4",
+        margin: {
+          top: 46 * PX_TO_MM,
+          right: 24 * PX_TO_MM,
+          bottom: 46 * PX_TO_MM,
+          left: 24 * PX_TO_MM,
         },
       };
 
-      pdfOptions.marginContent = marginContent;
+      function makeDoc() {
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+        doc.addFont("./fonts/arial.ttf", "Arial", "normal");
+        doc.addFont("./fonts/arial-bold.ttf", "Arial", "bold");
+        return doc;
+      }
 
-      const pdfOpts = pdfOptions;
+      const target = () => document.getElementById("print-section");
 
-      const doc = new jsPDF(pdfOpts);
+      document
+        .getElementById("generate-html")
+        .addEventListener("click", async () => {
+          const doc = makeDoc();
+          const out = await generatePDF(doc, target(), pdfOpts);
+          out.save("invoice-repro.pdf");
+        });
 
-      doc.addFont("./fonts/arial.ttf", "arial", "normal");
-      doc.addFont("./fonts/arial-bold.ttf", "arial", "bold");
+      document
+        .getElementById("generate-image")
+        .addEventListener("click", async () => {
+          const out = await generateImagePDF(target(), pdfOpts);
+          out.save("invoice-repro-image.pdf");
+        });
 
-      const htmlButton = document.getElementById("generate-html");
-      const imageButton = document.getElementById("generate-html-2");
-      const previewImagesButton = document.getElementById("preview-images");
-      const previewContainer = document.getElementById("preview-container");
-
-      htmlButton.addEventListener("click", async () => {
-        const target = document.getElementById("print-section");
-        if (!target) return;
-
-        const imagePDF = await generatePDF(doc, target, pdfOpts);
-        imagePDF.save("doc-html-renderer-test.pdf");
-      });
-
-      imageButton.addEventListener("click", async () => {
-        const target = document.getElementById("print-section");
-        if (!target) return;
-
-        const imagePDF = await generateImagePDF(target, pdfOpts);
-        imagePDF.save("doc-html-renderer-test.pdf");
-      });
-
-      // Preview as page images
-      previewImagesButton.addEventListener("click", async () => {
-        const target = document.getElementById("print-section");
-        if (!target) return;
-
-        await previewImages(target, previewContainer, pdfOpts);
-      });
+      document
+        .getElementById("preview-images")
+        .addEventListener("click", async () => {
+          await previewImages(
+            target(),
+            document.getElementById("preview-container"),
+            pdfOpts,
+          );
+        });
     </script>
   </body>
 </html>

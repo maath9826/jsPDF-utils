@@ -123,6 +123,12 @@ function resolveOptions(opts: PageOptionsInput = {}): PageOptions {
   };
 }
 
+/** Toggle verbose pagination/split logging. Flip to true to debug page breaks. */
+const DEBUG = false;
+function dlog(...args: unknown[]): void {
+  if (DEBUG) console.log("[jspdf-utils]", ...args);
+}
+
 /** Compute derived layout values from options. */
 function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
   const renderedWidth = container.offsetWidth;
@@ -134,6 +140,17 @@ function computeLayout(container: HTMLElement, opts: PageOptions): Layout {
   // cause sub-pixel rounding that accumulates across pages and eventually
   // cuts through text lines on later pages.
   const pageContentPx = Math.floor(usableHeightMm / scale);
+
+  dlog("computeLayout:", {
+    renderedWidth,
+    contentWidthMm: +contentWidthMm.toFixed(3),
+    scaleMmPerPx: +scale.toFixed(5),
+    usableHeightMm: +usableHeightMm.toFixed(3),
+    usableHeightPxExact: +(usableHeightMm / scale).toFixed(3),
+    pageContentPx,
+    cloneHeightPx: container.offsetHeight,
+    estPages: +(container.offsetHeight / pageContentPx).toFixed(3),
+  });
 
   return { renderedWidth, scale, contentWidthMm, pageContentPx };
 }
@@ -684,16 +701,29 @@ function splitTextAtBoundary(
   measure.style.margin = "0";
 
   measure.textContent = words[0];
-  if (measure.getBoundingClientRect().height > availableHeight) {
+  const firstWordH = measure.getBoundingClientRect().height;
+  dlog(
+    `    splitText: <${el.tagName}> words=${words.length} availH=${availableHeight.toFixed(1)} measureW=${width} firstWordH=${firstWordH.toFixed(1)}`,
+  );
+  if (firstWordH > availableHeight) {
+    dlog(`    splitText: first word taller than availableHeight -> decline`);
     measure.remove();
     return false;
   }
 
   const lo = binarySearchWordFit(measure, words, availableHeight, 0);
+  measure.textContent = words.slice(0, lo).join(" ");
+  const firstHalfH = measure.getBoundingClientRect().height;
+  dlog(
+    `    splitText: fit ${lo}/${words.length} words, firstHalfH=${firstHalfH.toFixed(1)} (availH=${availableHeight.toFixed(1)})`,
+  );
 
   measure.remove();
 
-  if (lo >= words.length) return false;
+  if (lo >= words.length) {
+    dlog(`    splitText: everything fits -> decline (no split needed)`);
+    return false;
+  }
 
   // Keep the original element as a wrapper (preserving its padding/margin)
   // and place the two halves inside it as plain <div> children.
@@ -715,13 +745,45 @@ function splitTextAtBoundary(
  * For tables and text elements, attempts to split at the boundary first
  * so content fills the current page before flowing to the next.
  */
+/**
+ * Whether an element's direct children are laid out top-to-bottom (so that
+ * distributing them across pages by recursing is meaningful).
+ *
+ * Block/list/flow-root and flex-column stack vertically → safe to recurse.
+ * A flex-ROW or grid lays children out side-by-side, so recursing would treat
+ * horizontally-adjacent items (e.g. a number bullet + its paragraph) as if they
+ * were stacked — and any spacer inserted inside a flex row becomes another
+ * horizontal item, pushing nothing down. Such elements must be treated as an
+ * atomic block and pushed whole to the next page instead.
+ */
+function childrenStackVertically(el: HTMLElement): boolean {
+  const cs = getComputedStyle(el);
+  const display = cs.display;
+  if (display === "flex" || display === "inline-flex") {
+    return cs.flexDirection.startsWith("column");
+  }
+  if (display.includes("grid")) return false;
+  return true;
+}
+
 function insertPageBreakSpacers(
   container: HTMLElement,
   pageContentPx: number,
   originY?: number,
+  depth = 0,
 ): void {
   if (originY === undefined) {
     originY = container.getBoundingClientRect().top;
+  }
+
+  const pad = "  ".repeat(depth);
+  const tag = (el: HTMLElement) =>
+    el.tagName +
+    (el.id ? "#" + el.id : "") +
+    (el.textContent ? ` "${el.textContent.trim().slice(0, 22)}…"` : "");
+
+  if (depth === 0) {
+    dlog(`pageBreak: originY=${originY.toFixed(2)} pageContentPx=${pageContentPx}`);
   }
 
   let i = 0;
@@ -733,11 +795,16 @@ function insertPageBreakSpacers(
     const pageEnd = (Math.floor(childTop / pageContentPx) + 1) * pageContentPx;
 
     // Use a 0.5px tolerance to avoid false positives from sub-pixel rounding
-    if (childBottom > pageEnd + 0.5) {
+    const straddles = childBottom > pageEnd + 0.5;
+    dlog(
+      `${pad}[d${depth} i${i}] ${tag(child)} top=${childTop.toFixed(1)} bottom=${childBottom.toFixed(1)} h=${childRect.height.toFixed(1)} page=${Math.floor(childTop / pageContentPx)} pageEnd=${pageEnd} straddles=${straddles}`,
+    );
+    if (straddles) {
       const remainingSpace = pageEnd - childTop;
 
       // Try splitting at the boundary first
       if (child.tagName === "TABLE") {
+        dlog(`${pad}  -> try splitTableAtBoundary (remaining=${remainingSpace.toFixed(1)})`);
         if (
           splitTableAtBoundary(
             child as HTMLTableElement,
@@ -745,27 +812,123 @@ function insertPageBreakSpacers(
             remainingSpace,
           )
         ) {
+          dlog(`${pad}  -> table split OK, re-checking same index`);
           continue; // Re-check same index (now holds the first part)
         }
-      } else if (child.children.length > 0) {
-        // Element has child elements — recurse to paginate its children
-        // instead of flattening it as text.
-        insertPageBreakSpacers(child, pageContentPx, originY);
+        dlog(`${pad}  -> table split declined`);
+      } else if (child.children.length > 0 && childrenStackVertically(child)) {
+        // Element has vertically-stacked child elements — recurse to paginate
+        // its children instead of flattening it as text.
+        dlog(`${pad}  -> recurse into children (${child.children.length})`);
+        insertPageBreakSpacers(child, pageContentPx, originY, depth + 1);
         i++;
         continue;
       } else if (splitTextAtBoundary(child, container, remainingSpace)) {
+        dlog(`${pad}  -> text split OK, re-checking same index`);
         continue; // Re-check same index
       }
 
       // Fallback: push to next page with spacer
       if (childRect.height <= pageContentPx) {
+        const spacerH = Math.ceil(pageEnd - childTop);
+        dlog(`${pad}  -> FALLBACK spacer height=${spacerH} (push to next page)`);
         const spacer = document.createElement("div");
-        spacer.style.height = Math.ceil(pageEnd - childTop) + "px";
+        spacer.style.height = spacerH + "px";
         child.parentNode!.insertBefore(spacer, child);
         i++; // Skip past the spacer
+      } else {
+        dlog(`${pad}  -> NO ACTION (child taller than a page: ${childRect.height.toFixed(1)} > ${pageContentPx}) — WILL BE SLICED`);
       }
     }
     i++;
+  }
+}
+
+/**
+ * Unicode bidi-mirrored character pairs — the same set jsPDF's BidiEngine
+ * uses for symmetric swapping. Each key maps to the glyph it should become
+ * when it sits inside a right-to-left run.
+ */
+const BIDI_MIRROR_MAP: Record<string, string> = {
+  "(": ")", // ( )
+  ")": "(", // ) (
+  "<": ">", // < >
+  ">": "<", // > <
+  "[": "]", // [ ]
+  "]": "[", // ] [
+  "{": "}", // { }
+  "}": "{", // } {
+  "«": "»", // « »
+  "»": "«", // » «
+  "‹": "›", // ‹ ›
+  "›": "‹", // › ‹
+  "≤": "≥", // ≤ ≥
+  "≥": "≤", // ≥ ≤
+};
+
+/** Strong left-to-right scripts (Latin, Greek, Cyrillic, …). */
+const STRONG_LTR_RE = /[A-Za-zÀ-ʯͰ-ϿЀ-ӿ]/;
+
+/**
+ * Fix bidi-mirrored punctuation in the clone before `doc.html()` renders it.
+ *
+ * `doc.html()` rasterizes through html2canvas-pro, which slices each text node
+ * into separate word/punctuation segments and draws every segment at the
+ * browser-computed (already bidi-correct) position via `ctx.fillText`. But the
+ * *glyph* drawn is the literal character — jsPDF never applies the mirror that
+ * the browser applied — so a lone `(` segment keeps its glyph even though the
+ * browser drew it as `)`. Result: `(صرح الجنوب)` renders as `)صرح الجنوب(`.
+ *
+ * Because mirror pairs share identical metrics, swapping the character in the
+ * clone leaves every segment's position unchanged but makes html2canvas read
+ * the mirrored glyph. The image-based renderers use the browser's own glyphs
+ * and don't need this.
+ *
+ * A mirror char is swapped when it resolves to an RTL run — approximated, as
+ * the bidi algorithm does for neutrals, by the direction of the preceding
+ * strong character, falling back to the run's base direction (the first strong
+ * character in the text node).
+ */
+function fixBidiMirroredText(root: HTMLElement): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    textNodes.push(n as Text);
+  }
+
+  for (const node of textNodes) {
+    const text = node.nodeValue;
+    if (!text) continue;
+
+    const chars = Array.from(text);
+    if (!chars.some((ch) => BIDI_MIRROR_MAP[ch])) continue;
+
+    // Base direction = first strong character (contextual), matching how a
+    // run with no explicit direction is resolved.
+    let baseRtl = false;
+    for (const ch of chars) {
+      if (RTL_RE.test(ch)) {
+        baseRtl = true;
+        break;
+      }
+      if (STRONG_LTR_RE.test(ch)) break;
+    }
+
+    let lastStrongRtl = baseRtl;
+    let changed = false;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      if (RTL_RE.test(ch)) {
+        lastStrongRtl = true;
+      } else if (STRONG_LTR_RE.test(ch)) {
+        lastStrongRtl = false;
+      } else if (lastStrongRtl && BIDI_MIRROR_MAP[ch]) {
+        chars[i] = BIDI_MIRROR_MAP[ch];
+        changed = true;
+      }
+    }
+
+    if (changed) node.nodeValue = chars.join("");
   }
 }
 
@@ -784,6 +947,7 @@ function prepare(
   const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
   normalizeTableAttributes(clone);
+  fixBidiMirroredText(clone);
   const layout = computeLayout(clone, merged);
 
   splitOversizedTables(clone, layout.pageContentPx);
