@@ -8,7 +8,9 @@
 import html2canvas, {
   type Options as Html2CanvasOptions,
 } from "html2canvas-pro";
-import jsPDF from "jspdf-with-html2canvas-pro";
+// Type-only: jspdf is only loaded at runtime via the dynamic import in
+// generateImagePDF, so consumers that never call it don't pay for the bundle.
+import type jsPDF from "jspdf-with-html2canvas-pro";
 
 export interface Margin {
   top: number;
@@ -316,6 +318,12 @@ function snapshotComputedStyles(source: HTMLElement, clone: HTMLElement): void {
 function createPrintClone(source: HTMLElement, pageWidth = 210): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
   snapshotComputedStyles(source, clone);
+  // The clone is measured off-screen (or invisible), where lazy images never
+  // approach the viewport and so never start loading — stalling
+  // waitForImages and measuring at zero height.
+  for (const img of Array.from(clone.querySelectorAll("img"))) {
+    img.loading = "eager";
+  }
   Object.assign(clone.style, {
     position: "fixed",
     top: "0",
@@ -337,10 +345,13 @@ async function waitForImages(container: HTMLElement): Promise<void> {
   const images = Array.from(container.querySelectorAll("img"));
   await Promise.all(
     images.map((img) => {
-      if (img.complete && img.naturalWidth > 0) return;
+      // `complete` is also true for images that failed to load (naturalWidth
+      // 0); their load/error events already fired and never fire again, so
+      // waiting on them would hang forever.
+      if (img.complete) return;
       return new Promise<void>((resolve) => {
-        img.onload = () => resolve();
-        img.onerror = () => resolve();
+        img.addEventListener("load", () => resolve(), { once: true });
+        img.addEventListener("error", () => resolve(), { once: true });
       });
     }),
   );
@@ -367,10 +378,12 @@ async function expandToFitOverflow(container: HTMLElement): Promise<void> {
 }
 
 /**
- * Downscale and compress images in a clone so that doc.html() doesn't embed
- * them at their full intrinsic resolution (which can be 10-100× larger than
- * the displayed size). Each image is redrawn at 2× its displayed size
- * (for reasonable print quality) and converted to a compressed JPEG data URL.
+ * Downscale images in a clone so that doc.html() doesn't embed them at
+ * their full intrinsic resolution (which can be 10-100× larger than the
+ * displayed size). Each image is redrawn at 2× its displayed size (for
+ * reasonable print quality) and converted to a PNG data URL — PNG rather
+ * than JPEG so images with transparency keep their alpha channel instead
+ * of being flattened onto black.
  */
 async function compressCloneImages(clone: HTMLElement): Promise<void> {
   const images = Array.from(clone.querySelectorAll("img"));
@@ -465,7 +478,7 @@ function splitOversizedTables(
     const parsed = parseTableStructure(table);
     if (!parsed) continue;
 
-    const { headerRow, bodyRows, headerHeight } = parsed;
+    const { headerRows, bodyRows, headerHeight } = parsed;
     const maxRowsHeight = pageContentPx - headerHeight - 2;
 
     const groups: HTMLTableRowElement[][] = [];
@@ -485,8 +498,7 @@ function splitOversizedTables(
     if (group.length > 0) groups.push(group);
 
     for (const g of groups) {
-      const t = table.cloneNode(false) as HTMLTableElement;
-      if (headerRow) t.appendChild(headerRow.cloneNode(true));
+      const t = startTableFragment(table, headerRows);
       for (const row of g) t.appendChild(row.cloneNode(true));
       table.parentNode!.insertBefore(t, table);
     }
@@ -550,19 +562,61 @@ function binarySearchWordFit(
 function parseTableStructure(table: HTMLTableElement): {
   rows: HTMLTableRowElement[];
   hasHeader: boolean;
-  headerRow: HTMLTableRowElement | null;
+  headerRows: HTMLTableRowElement[];
   bodyRows: HTMLTableRowElement[];
   headerHeight: number;
 } | null {
   const rows = Array.from(table.rows);
   if (rows.length === 0) return null;
 
-  const hasHeader = rows[0].querySelector("th") !== null;
-  const headerRow = hasHeader ? rows[0] : null;
-  const bodyRows = hasHeader ? rows.slice(1) : rows;
-  const headerHeight = headerRow ? headerRow.offsetHeight : 0;
+  // Header = ALL rows inside <thead> (so multi-row headers, e.g. an Arabic row +
+  // an English row, are repeated together on every page). Fall back to a single
+  // leading row that has <th> cells when there's no explicit <thead>.
+  let headerRows: HTMLTableRowElement[] = table.tHead
+    ? Array.from(table.tHead.rows)
+    : [];
+  if (
+    headerRows.length === 0 &&
+    // Check the row's own cells (not querySelector, which would also match
+    // a <th> belonging to a table nested inside one of the cells).
+    Array.from(rows[0].cells).some((cell) => cell.tagName === "TH")
+  ) {
+    headerRows = [rows[0]];
+  }
 
-  return { rows, hasHeader, headerRow, bodyRows, headerHeight };
+  const headerSet = new Set(headerRows);
+  const bodyRows = rows.filter((r) => !headerSet.has(r));
+  const headerHeight = headerRows.reduce((h, r) => h + r.offsetHeight, 0);
+
+  return {
+    rows,
+    hasHeader: headerRows.length > 0,
+    headerRows,
+    bodyRows,
+    headerHeight,
+  };
+}
+
+/**
+ * Start a fresh table fragment that mirrors the original's `<colgroup>` (so
+ * column widths survive the split) and repeats all header rows.
+ */
+function startTableFragment(
+  table: HTMLTableElement,
+  headerRows: HTMLTableRowElement[],
+): HTMLTableElement {
+  const t = table.cloneNode(false) as HTMLTableElement;
+  for (const cg of Array.from(
+    table.querySelectorAll<HTMLElement>(":scope > colgroup"),
+  )) {
+    t.appendChild(cg.cloneNode(true));
+  }
+  if (headerRows.length > 0) {
+    const thead = document.createElement("thead");
+    for (const hr of headerRows) thead.appendChild(hr.cloneNode(true));
+    t.appendChild(thead);
+  }
+  return t;
 }
 
 /**
@@ -637,7 +691,7 @@ function splitTableAtBoundary(
   const parsed = parseTableStructure(table);
   if (!parsed) return false;
 
-  const { headerRow, bodyRows, headerHeight } = parsed;
+  const { headerRows, bodyRows, headerHeight } = parsed;
 
   if (bodyRows.length < 2) return false;
 
@@ -654,14 +708,12 @@ function splitTableAtBoundary(
 
   if (fitCount === 0 || fitCount === bodyRows.length) return false;
 
-  const firstTable = table.cloneNode(false) as HTMLTableElement;
-  if (headerRow) firstTable.appendChild(headerRow.cloneNode(true));
+  const firstTable = startTableFragment(table, headerRows);
   for (let i = 0; i < fitCount; i++) {
     firstTable.appendChild(bodyRows[i].cloneNode(true));
   }
 
-  const secondTable = table.cloneNode(false) as HTMLTableElement;
-  if (headerRow) secondTable.appendChild(headerRow.cloneNode(true));
+  const secondTable = startTableFragment(table, headerRows);
   for (let i = fitCount; i < bodyRows.length; i++) {
     secondTable.appendChild(bodyRows[i].cloneNode(true));
   }
@@ -796,9 +848,13 @@ function insertPageBreakSpacers(
 
     // Use a 0.5px tolerance to avoid false positives from sub-pixel rounding
     const straddles = childBottom > pageEnd + 0.5;
-    dlog(
-      `${pad}[d${depth} i${i}] ${tag(child)} top=${childTop.toFixed(1)} bottom=${childBottom.toFixed(1)} h=${childRect.height.toFixed(1)} page=${Math.floor(childTop / pageContentPx)} pageEnd=${pageEnd} straddles=${straddles}`,
-    );
+    // Guarded because tag() walks the child's whole subtree via textContent —
+    // dlog's arguments would be evaluated even when DEBUG is off.
+    if (DEBUG) {
+      dlog(
+        `${pad}[d${depth} i${i}] ${tag(child)} top=${childTop.toFixed(1)} bottom=${childBottom.toFixed(1)} h=${childRect.height.toFixed(1)} page=${Math.floor(childTop / pageContentPx)} pageEnd=${pageEnd} straddles=${straddles}`,
+      );
+    }
     if (straddles) {
       const remainingSpace = pageEnd - childTop;
 
@@ -869,6 +925,10 @@ const BIDI_MIRROR_MAP: Record<string, string> = {
 /** Strong left-to-right scripts (Latin, Greek, Cyrillic, …). */
 const STRONG_LTR_RE = /[A-Za-zÀ-ʯͰ-ϿЀ-ӿ]/;
 
+/** Strong right-to-left scripts (Arabic, Hebrew, and their presentation forms). */
+const RTL_RE =
+  /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿֐-׿]/;
+
 /**
  * Fix bidi-mirrored punctuation in the clone before `doc.html()` renders it.
  *
@@ -938,31 +998,42 @@ function fixBidiMirroredText(root: HTMLElement): void {
  * Clones the element, splits oversized tables/text, and inserts page-break
  * spacers. Returns the ready-to-render clone and layout metadata.
  */
-function prepare(
+async function prepare(
   source: HTMLElement,
   opts: PageOptionsInput = {},
-): PrepareResult {
+): Promise<PrepareResult> {
   const merged = resolveOptions(opts);
 
   const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
-  normalizeTableAttributes(clone);
-  fixBidiMirroredText(clone);
-  const layout = computeLayout(clone, merged);
+  try {
+    normalizeTableAttributes(clone);
+    fixBidiMirroredText(clone);
+    // Pagination is computed from measured heights, so images and webfonts
+    // must be loaded first — a late-loading resource shifts every element
+    // below it after the break positions are already fixed.
+    await waitForImages(clone);
+    await document.fonts.ready;
+    const layout = computeLayout(clone, merged);
 
-  splitOversizedTables(clone, layout.pageContentPx);
-  splitOversizedText(clone, layout.pageContentPx);
-  insertPageBreakSpacers(clone, layout.pageContentPx);
+    splitOversizedTables(clone, layout.pageContentPx);
+    splitOversizedText(clone, layout.pageContentPx);
+    insertPageBreakSpacers(clone, layout.pageContentPx);
 
-  return {
-    clone,
-    layout,
-    options: merged,
-    cleanup: () => {
-      clone.remove();
-      removeResetStyles();
-    },
-  };
+    return {
+      clone,
+      layout,
+      options: merged,
+      cleanup: () => {
+        clone.remove();
+        removeResetStyles();
+      },
+    };
+  } catch (err) {
+    clone.remove();
+    removeResetStyles();
+    throw err;
+  }
 }
 
 /**
@@ -981,7 +1052,13 @@ async function generatePDF(
       | "html2canvasOptions"
     > = {},
 ): Promise<jsPDF> {
-  const { clone, layout, options, cleanup } = prepare(source, opts);
+  const { clone, layout, options, cleanup } = await prepare(source, opts);
+
+  // doc.html derives the html2canvas scale from width / windowWidth — the
+  // same ratio the page-break spacers were measured against. A caller-
+  // supplied scale would override it and desync every break position.
+  const html2canvasOptions = { ...opts.html2canvasOptions };
+  delete html2canvasOptions.scale;
 
   try {
     await compressCloneImages(clone);
@@ -999,7 +1076,7 @@ async function generatePDF(
         // jspdf's bundled html2canvas type is older than html2canvas-pro's
         // (e.g. onclone signature differs). The runtime call forwards
         // identically, so cast through unknown.
-        html2canvas: opts.html2canvasOptions as never,
+        html2canvas: html2canvasOptions as never,
       });
     });
   } finally {
@@ -1332,9 +1409,6 @@ function resolveMarginOverride(
 }
 
 /** Draw a repeated-text rectangle on a canvas. */
-const RTL_RE =
-  /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]/;
-
 async function renderTextEdgeStrip(
   text: string,
   widthPx: number,
@@ -1710,24 +1784,35 @@ async function prepareImageRenderClone(
 ): Promise<{ clone: HTMLElement; layout: Layout; cleanup: () => void }> {
   const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
-  clone.style.opacity = "1";
-  clone.style.left = "-99999px";
-  normalizeTableAttributes(clone);
-  const layout = computeLayout(clone, merged);
+  try {
+    clone.style.opacity = "1";
+    clone.style.left = "-99999px";
+    normalizeTableAttributes(clone);
+    // Pagination is computed from measured heights, so images and webfonts
+    // must be loaded first — a late-loading resource shifts every element
+    // below it after the break positions are already fixed.
+    await waitForImages(clone);
+    await document.fonts.ready;
+    const layout = computeLayout(clone, merged);
 
-  splitOversizedTables(clone, layout.pageContentPx);
-  splitOversizedText(clone, layout.pageContentPx);
-  insertPageBreakSpacers(clone, layout.pageContentPx);
-  await expandToFitOverflow(clone);
+    splitOversizedTables(clone, layout.pageContentPx);
+    splitOversizedText(clone, layout.pageContentPx);
+    insertPageBreakSpacers(clone, layout.pageContentPx);
+    await expandToFitOverflow(clone);
 
-  return {
-    clone,
-    layout,
-    cleanup: () => {
-      clone.remove();
-      removeResetStyles();
-    },
-  };
+    return {
+      clone,
+      layout,
+      cleanup: () => {
+        clone.remove();
+        removeResetStyles();
+      },
+    };
+  } catch (err) {
+    clone.remove();
+    removeResetStyles();
+    throw err;
+  }
 }
 
 /**
@@ -1752,6 +1837,9 @@ async function generateImagePDF(
       backgroundColor: null,
     });
 
+    // Deliberately dynamic (the top-level import is type-only): this is the
+    // only value-level use of jspdf, so it stays in a lazy chunk that
+    // consumers of the other entry points never load.
     const { jsPDF: JsPDF } = await import("jspdf-with-html2canvas-pro");
 
     const dims = computePageDimensions(canvas, merged, layout, scale);
@@ -1981,118 +2069,121 @@ async function addMarginContent(
   const pageWidthPx = Math.round(merged.pageWidth * pxPerMm);
   const pageHeightPx = Math.round(merged.pageHeight * pxPerMm);
 
-  const staticCache = content
-    ? await preRenderStaticSlots(content, merged, scale)
-    : {};
+  try {
+    const staticCache = content
+      ? await preRenderStaticSlots(content, merged, scale)
+      : {};
 
-  // Pre-convert static slot canvases to data URLs (reused across pages via alias)
-  const staticDataUrls: Partial<Record<MarginSlot, string>> = {};
-  for (const slot of MARGIN_SLOTS) {
-    if (staticCache[slot]) {
-      staticDataUrls[slot] = staticCache[slot]!.toDataURL("image/png");
+    // Pre-convert static slot canvases to data URLs (reused across pages via alias)
+    const staticDataUrls: Partial<Record<MarginSlot, string>> = {};
+    for (const slot of MARGIN_SLOTS) {
+      if (staticCache[slot]) {
+        staticDataUrls[slot] = staticCache[slot]!.toDataURL("image/png");
+      }
     }
-  }
 
-  // Pre-render text border once (identical on every page)
-  let textBorderDataUrl: string | undefined;
-  if (textBorder) {
-    const tbCanvas = document.createElement("canvas");
-    tbCanvas.width = pageWidthPx;
-    tbCanvas.height = pageHeightPx;
-    const tbCtx = tbCanvas.getContext("2d");
-    if (tbCtx) {
-      const bm = resolveBorderMargin(textBorder, merged);
-      await drawTextBorderOnCanvas(
-        tbCtx,
-        textBorder,
-        pxPerMm,
-        Math.round(bm.left * pxPerMm),
-        Math.round(bm.top * pxPerMm),
-        Math.round((merged.pageWidth - bm.left - bm.right) * pxPerMm),
-        Math.round((merged.pageHeight - bm.top - bm.bottom) * pxPerMm),
-      );
-      textBorderDataUrl = tbCanvas.toDataURL("image/png");
+    // Pre-render text border once (identical on every page)
+    let textBorderDataUrl: string | undefined;
+    if (textBorder) {
+      const tbCanvas = document.createElement("canvas");
+      tbCanvas.width = pageWidthPx;
+      tbCanvas.height = pageHeightPx;
+      const tbCtx = tbCanvas.getContext("2d");
+      if (tbCtx) {
+        const bm = resolveBorderMargin(textBorder, merged);
+        await drawTextBorderOnCanvas(
+          tbCtx,
+          textBorder,
+          pxPerMm,
+          Math.round(bm.left * pxPerMm),
+          Math.round(bm.top * pxPerMm),
+          Math.round((merged.pageWidth - bm.left - bm.right) * pxPerMm),
+          Math.round((merged.pageHeight - bm.top - bm.bottom) * pxPerMm),
+        );
+        textBorderDataUrl = tbCanvas.toDataURL("image/png");
+      }
     }
-  }
 
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
 
-    // Render each margin slot as an individual small image
-    if (content) {
-      const contentMargin = resolveMarginOverride(
-        content.margin,
-        merged,
-        createUniformMargin(PAGE_MARGINS[merged.format]),
-      );
-      for (const slot of MARGIN_SLOTS) {
-        const val = content[slot];
-        if (!val) continue;
+      // Render each margin slot as an individual small image
+      if (content) {
+        const contentMargin = resolveMarginOverride(
+          content.margin,
+          merged,
+          createUniformMargin(PAGE_MARGINS[merged.format]),
+        );
+        for (const slot of MARGIN_SLOTS) {
+          const val = content[slot];
+          if (!val) continue;
 
-        const rect = getSlotRect(slot, merged, contentMargin);
-        if (rect.width <= 0 || rect.height <= 0) continue;
+          const rect = getSlotRect(slot, merged, contentMargin);
+          if (rect.width <= 0 || rect.height <= 0) continue;
 
-        let dataUrl: string;
-        let alias: string | undefined;
+          let dataUrl: string;
+          let alias: string | undefined;
 
-        if (typeof val === "function") {
-          const el = resolveMarginResult(val(i, totalPages));
-          if (!el) continue;
-          const slotCanvas = await renderSlotToCanvas(
-            el,
+          if (typeof val === "function") {
+            const el = resolveMarginResult(val(i, totalPages));
+            if (!el) continue;
+            const slotCanvas = await renderSlotToCanvas(
+              el,
+              rect.width,
+              rect.height,
+              scale,
+            );
+            dataUrl = slotCanvas.toDataURL("image/png");
+          } else {
+            dataUrl = staticDataUrls[slot]!;
+            alias = `margin-${slot}`;
+          }
+
+          doc.addImage(
+            dataUrl,
+            "PNG",
+            rect.x,
+            rect.y,
             rect.width,
             rect.height,
-            scale,
+            alias,
+            "SLOW",
           );
-          dataUrl = slotCanvas.toDataURL("image/png");
-        } else {
-          dataUrl = staticDataUrls[slot]!;
-          alias = `margin-${slot}`;
         }
+      }
 
+      // Draw content border natively using jsPDF vector commands (zero image overhead)
+      if (border) {
+        const { color = "#000000", width = 0.3 } = border;
+        const bm = resolveBorderMargin(border, merged);
+        doc.setDrawColor(color);
+        doc.setLineWidth(width);
+        doc.rect(
+          bm.left,
+          bm.top,
+          merged.pageWidth - bm.left - bm.right,
+          merged.pageHeight - bm.top - bm.bottom,
+        );
+      }
+
+      // Add pre-rendered text border (reused across pages via alias)
+      if (textBorderDataUrl) {
         doc.addImage(
-          dataUrl,
+          textBorderDataUrl,
           "PNG",
-          rect.x,
-          rect.y,
-          rect.width,
-          rect.height,
-          alias,
+          0,
+          0,
+          merged.pageWidth,
+          merged.pageHeight,
+          "text-border",
           "SLOW",
         );
       }
     }
-
-    // Draw content border natively using jsPDF vector commands (zero image overhead)
-    if (border) {
-      const { color = "#000000", width = 0.3 } = border;
-      const bm = resolveBorderMargin(border, merged);
-      doc.setDrawColor(color);
-      doc.setLineWidth(width);
-      doc.rect(
-        bm.left,
-        bm.top,
-        merged.pageWidth - bm.left - bm.right,
-        merged.pageHeight - bm.top - bm.bottom,
-      );
-    }
-
-    // Add pre-rendered text border (reused across pages via alias)
-    if (textBorderDataUrl) {
-      doc.addImage(
-        textBorderDataUrl,
-        "PNG",
-        0,
-        0,
-        merged.pageWidth,
-        merged.pageHeight,
-        "text-border",
-        "SLOW",
-      );
-    }
+  } finally {
+    removeResetStyles();
   }
 
-  removeResetStyles();
   return doc;
 }
 
