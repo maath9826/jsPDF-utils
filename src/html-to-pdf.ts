@@ -1014,6 +1014,13 @@ async function prepare(
     // below it after the break positions are already fixed.
     await waitForImages(clone);
     await document.fonts.ready;
+    // Image downscaling swaps every <img> src and pins its box to integer
+    // width/height — a (small) layout mutation. It must happen BEFORE the
+    // heights are measured: doc.html() renders the post-compression layout,
+    // so measuring the pre-compression one would leave every break position
+    // computed against a document that no longer exists.
+    await compressCloneImages(clone);
+    await waitForImages(clone);
     const layout = computeLayout(clone, merged);
 
     splitOversizedTables(clone, layout.pageContentPx);
@@ -1061,7 +1068,6 @@ async function generatePDF(
   delete html2canvasOptions.scale;
 
   try {
-    await compressCloneImages(clone);
     await new Promise<void>((resolve) => {
       doc.html(clone, {
         callback: () => resolve(),
