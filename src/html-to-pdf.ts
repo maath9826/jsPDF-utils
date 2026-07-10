@@ -48,6 +48,16 @@ export type PageOptionsInput = Partial<Omit<PageOptions, "margin">> & {
   margin?: MarginInput;
 };
 
+export interface PaginationOptions {
+  /**
+   * Repeat a table's header rows (all rows in `<thead>`, or a leading
+   * all-`<th>` row) at the top of every page a page-split table continues
+   * onto. When `false`, the header appears only once — where the table
+   * starts. Default: `true`.
+   */
+  repeatTableHeaders?: boolean;
+}
+
 /** Standard page dimensions in mm (portrait). */
 const PAGE_SIZES: Record<PageFormat, [number, number]> = {
   a0: [841, 1189],
@@ -460,52 +470,6 @@ function normalizeTableAttributes(container: HTMLElement): void {
   }
 }
 
-/**
- * Split tables that exceed one page height into smaller sub-tables,
- * repeating the header row in each chunk.
- *
- * Only operates on direct-child tables of `container`.
- */
-function splitOversizedTables(
-  container: HTMLElement,
-  pageContentPx: number,
-): void {
-  for (const table of Array.from(
-    container.querySelectorAll<HTMLTableElement>(":scope > table"),
-  )) {
-    if (table.offsetHeight <= pageContentPx) continue;
-
-    const parsed = parseTableStructure(table);
-    if (!parsed) continue;
-
-    const { headerRows, bodyRows, headerHeight } = parsed;
-    const maxRowsHeight = pageContentPx - headerHeight - 2;
-
-    const groups: HTMLTableRowElement[][] = [];
-    let group: HTMLTableRowElement[] = [];
-    let groupHeight = 0;
-
-    for (const row of bodyRows) {
-      const rh = row.offsetHeight;
-      if (groupHeight + rh > maxRowsHeight && group.length > 0) {
-        groups.push(group);
-        group = [];
-        groupHeight = 0;
-      }
-      group.push(row);
-      groupHeight += rh;
-    }
-    if (group.length > 0) groups.push(group);
-
-    for (const g of groups) {
-      const t = startTableFragment(table, headerRows);
-      for (const row of g) t.appendChild(row.cloneNode(true));
-      table.parentNode!.insertBefore(t, table);
-    }
-    table.remove();
-  }
-}
-
 /** Create a hidden off-screen element for height measurement. */
 function createMeasureElement(
   tag: string,
@@ -680,13 +644,15 @@ function splitOversizedText(
 
 /**
  * Split a table at a page boundary so the rows that fit stay on the current
- * page and the remainder starts on the next page (with the header repeated).
+ * page and the remainder starts on the next page (with the header repeated,
+ * unless `repeatHeaders` is false).
  * Returns true if the split was performed.
  */
 function splitTableAtBoundary(
   table: HTMLTableElement,
   container: HTMLElement,
   availableHeight: number,
+  repeatHeaders: boolean,
 ): boolean {
   const parsed = parseTableStructure(table);
   if (!parsed) return false;
@@ -708,12 +674,17 @@ function splitTableAtBoundary(
 
   if (fitCount === 0 || fitCount === bodyRows.length) return false;
 
+  // The first fragment always keeps the header rows — they belong to the
+  // table's natural start. Only the continuation repeats them (opt-out).
   const firstTable = startTableFragment(table, headerRows);
   for (let i = 0; i < fitCount; i++) {
     firstTable.appendChild(bodyRows[i].cloneNode(true));
   }
 
-  const secondTable = startTableFragment(table, headerRows);
+  const secondTable = startTableFragment(
+    table,
+    repeatHeaders ? headerRows : [],
+  );
   for (let i = fitCount; i < bodyRows.length; i++) {
     secondTable.appendChild(bodyRows[i].cloneNode(true));
   }
@@ -821,6 +792,7 @@ function childrenStackVertically(el: HTMLElement): boolean {
 function insertPageBreakSpacers(
   container: HTMLElement,
   pageContentPx: number,
+  repeatHeaders: boolean,
   originY?: number,
   depth = 0,
 ): void {
@@ -866,6 +838,7 @@ function insertPageBreakSpacers(
             child as HTMLTableElement,
             container,
             remainingSpace,
+            repeatHeaders,
           )
         ) {
           dlog(`${pad}  -> table split OK, re-checking same index`);
@@ -876,7 +849,7 @@ function insertPageBreakSpacers(
         // Element has vertically-stacked child elements — recurse to paginate
         // its children instead of flattening it as text.
         dlog(`${pad}  -> recurse into children (${child.children.length})`);
-        insertPageBreakSpacers(child, pageContentPx, originY, depth + 1);
+        insertPageBreakSpacers(child, pageContentPx, repeatHeaders, originY, depth + 1);
         i++;
         continue;
       } else if (splitTextAtBoundary(child, container, remainingSpace)) {
@@ -892,6 +865,21 @@ function insertPageBreakSpacers(
         spacer.style.height = spacerH + "px";
         child.parentNode!.insertBefore(spacer, child);
         i++; // Skip past the spacer
+      } else if (remainingSpace < pageContentPx - 2) {
+        // Taller than a page AND starts partway down the page, but the split
+        // above declined (e.g. no room left for a table's header plus one
+        // row). Push it to the top of the next page and re-check it there
+        // with a full page available — a table is then carved one page's
+        // worth of rows per iteration. The 2px guard means an element
+        // already sitting at a page top is never pushed again (spacer
+        // rounding leaves at most 1px of drift), so this cannot loop.
+        const spacerH = Math.ceil(pageEnd - childTop);
+        dlog(`${pad}  -> FALLBACK spacer height=${spacerH} (push oversized child to page top, re-check)`);
+        const spacer = document.createElement("div");
+        spacer.style.height = spacerH + "px";
+        child.parentNode!.insertBefore(spacer, child);
+        i++; // Point back at the child (the spacer took its index)
+        continue;
       } else {
         dlog(`${pad}  -> NO ACTION (child taller than a page: ${childRect.height.toFixed(1)} > ${pageContentPx}) — WILL BE SLICED`);
       }
@@ -1000,9 +988,10 @@ function fixBidiMirroredText(root: HTMLElement): void {
  */
 async function prepare(
   source: HTMLElement,
-  opts: PageOptionsInput = {},
+  opts: PageOptionsInput & PaginationOptions = {},
 ): Promise<PrepareResult> {
   const merged = resolveOptions(opts);
+  const repeatTableHeaders = opts.repeatTableHeaders ?? true;
 
   const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
@@ -1023,9 +1012,8 @@ async function prepare(
     await waitForImages(clone);
     const layout = computeLayout(clone, merged);
 
-    splitOversizedTables(clone, layout.pageContentPx);
     splitOversizedText(clone, layout.pageContentPx);
-    insertPageBreakSpacers(clone, layout.pageContentPx);
+    insertPageBreakSpacers(clone, layout.pageContentPx, repeatTableHeaders);
 
     return {
       clone,
@@ -1057,6 +1045,7 @@ async function generatePDF(
       | "textBorder"
       | "border"
       | "html2canvasOptions"
+      | "repeatTableHeaders"
     > = {},
 ): Promise<jsPDF> {
   const { clone, layout, options, cleanup } = await prepare(source, opts);
@@ -1162,7 +1151,7 @@ export interface MarginContentInput {
     | { top?: number; right?: number; bottom?: number; left?: number };
 }
 
-export interface ImagePDFOptions {
+export interface ImagePDFOptions extends PaginationOptions {
   imageFormat?: "JPEG" | "PNG";
   imageQuality?: number;
   scale?: number;
@@ -1787,6 +1776,7 @@ function drawContentSliceOnCanvas(
 async function prepareImageRenderClone(
   source: HTMLElement,
   merged: PageOptions,
+  repeatTableHeaders: boolean,
 ): Promise<{ clone: HTMLElement; layout: Layout; cleanup: () => void }> {
   const removeResetStyles = injectRenderResetStyles();
   const clone = createPrintClone(source, merged.pageWidth);
@@ -1801,9 +1791,8 @@ async function prepareImageRenderClone(
     await document.fonts.ready;
     const layout = computeLayout(clone, merged);
 
-    splitOversizedTables(clone, layout.pageContentPx);
     splitOversizedText(clone, layout.pageContentPx);
-    insertPageBreakSpacers(clone, layout.pageContentPx);
+    insertPageBreakSpacers(clone, layout.pageContentPx, repeatTableHeaders);
     await expandToFitOverflow(clone);
 
     return {
@@ -1834,6 +1823,7 @@ async function generateImagePDF(
   const { clone, layout, cleanup } = await prepareImageRenderClone(
     source,
     merged,
+    opts.repeatTableHeaders ?? true,
   );
 
   try {
@@ -1931,6 +1921,7 @@ async function generateImages(
   const { clone, layout, cleanup } = await prepareImageRenderClone(
     source,
     merged,
+    opts.repeatTableHeaders ?? true,
   );
 
   try {

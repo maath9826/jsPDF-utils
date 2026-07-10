@@ -111,6 +111,7 @@ Important:
 - `border?: Border`
 - `textBorder?: TextBorder`
 - `forcedPageCount?: number`
+- `repeatTableHeaders?: boolean` (default: `true`)
 
 `forcedPageCount` behavior:
 
@@ -119,6 +120,15 @@ Important:
 - `generateImagePDF`: only rasterizes and writes first `N` pages.
 - `generateImages` and `previewImages`: only returns/displays first `N` pages.
 - Invalid values (`<= 0`, `NaN`, `Infinity`) are ignored.
+
+`repeatTableHeaders` behavior:
+
+- Accepted by `generatePDF`, `generateImagePDF`, `generateImages`, and
+  `previewImages`.
+- When a table is split across pages, its header rows (all rows in `<thead>`,
+  or a leading all-`<th>` row) are repeated at the top of each page the table
+  continues onto — at most once per page.
+- Set to `false` to render the header only once, where the table starts.
 
 ## Margin Content and Borders
 
