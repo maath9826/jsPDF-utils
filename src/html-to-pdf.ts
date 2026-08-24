@@ -980,6 +980,66 @@ function fixBidiMirroredText(root: HTMLElement): void {
   }
 }
 
+/** European + Arabic-Indic + Extended Arabic-Indic digits (bidi classes EN/AN). */
+const DIGIT_RE = /[0-9٠-٩۰-۹]/;
+
+/**
+ * Split every text node at boundaries between RTL-letter runs and digit/Latin
+ * runs, so no single node carries a glued mixed word like "الكل١٠".
+ *
+ * html2canvas-pro segments a text node into words and draws each word with one
+ * `ctx.fillText` — unless the word's Range spans more than one client rect, in
+ * which case it falls back to drawing PER GRAPHEME. A word that glues Arabic
+ * letters to digits (Arabic-Indic or European, no space between) always spans
+ * two bidi runs — the letters and the number resolve to different embedding
+ * levels — so its Range yields two rects, the grapheme fallback kicks in, and
+ * jsPDF's Arabic shaper is fed one letter at a time: every letter comes out in
+ * isolated form and "الكل١٠" renders as disconnected letters.
+ *
+ * Splitting the text NODE at the run boundary changes nothing visually (bidi
+ * and layout work across node boundaries) but makes every word measure as a
+ * single run — one rect — so whole words reach the shaper again. Neutrals
+ * (punctuation, spaces) stay attached to the preceding run; the word
+ * segmenter isolates them anyway.
+ */
+function splitTextNodesAtBidiRuns(root: HTMLElement): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    textNodes.push(n as Text);
+  }
+
+  // Digits first: Arabic-Indic digits sit inside RTL_RE's Arabic block but
+  // form their own bidi run (class AN), exactly like European digits (EN).
+  const classify = (ch: string): "ltr" | "rtl" | null => {
+    if (DIGIT_RE.test(ch)) return "ltr";
+    if (RTL_RE.test(ch)) return "rtl";
+    if (STRONG_LTR_RE.test(ch)) return "ltr";
+    return null;
+  };
+
+  for (const node of textNodes) {
+    const text = node.nodeValue;
+    if (!text) continue;
+
+    // UTF-16 offsets where the direction run changes. Only BMP characters
+    // classify as strong, so a cut can never land inside a surrogate pair.
+    const cuts: number[] = [];
+    let runClass: "ltr" | "rtl" | null = null;
+    for (let i = 0; i < text.length; i++) {
+      const cls = classify(text[i]);
+      if (cls === null) continue;
+      if (runClass !== null && cls !== runClass) cuts.push(i);
+      runClass = cls;
+    }
+
+    // splitText mutates in place; cut back-to-front so offsets stay valid.
+    for (let c = cuts.length - 1; c >= 0; c--) {
+      node.splitText(cuts[c]);
+    }
+  }
+}
+
 /**
  * Prepare an HTML element for doc.html() rendering.
  *
@@ -998,6 +1058,7 @@ async function prepare(
   try {
     normalizeTableAttributes(clone);
     fixBidiMirroredText(clone);
+    splitTextNodesAtBidiRuns(clone);
     // Pagination is computed from measured heights, so images and webfonts
     // must be loaded first — a late-loading resource shifts every element
     // below it after the break positions are already fixed.
