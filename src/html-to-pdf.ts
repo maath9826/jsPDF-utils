@@ -984,25 +984,41 @@ function fixBidiMirroredText(root: HTMLElement): void {
 const DIGIT_RE = /[0-9٠-٩۰-۹]/;
 
 /**
- * Split every text node at boundaries between RTL-letter runs and digit/Latin
- * runs, so no single node carries a glued mixed word like "الكل١٠".
+ * Split every text node so that each word, and each whitespace run, is its
+ * own node — and additionally cut inside a word wherever an RTL-letter run
+ * meets a digit/Latin run (a glued mixed word like "الكل١٠").
  *
  * html2canvas-pro segments a text node into words and draws each word with one
  * `ctx.fillText` — unless the word's Range spans more than one client rect, in
- * which case it falls back to drawing PER GRAPHEME. A word that glues Arabic
- * letters to digits (Arabic-Indic or European, no space between) always spans
- * two bidi runs — the letters and the number resolve to different embedding
- * levels — so its Range yields two rects, the grapheme fallback kicks in, and
- * jsPDF's Arabic shaper is fed one letter at a time: every letter comes out in
- * isolated form and "الكل١٠" renders as disconnected letters.
+ * which case it falls back to drawing PER GRAPHEME. jsPDF's Arabic shaper is
+ * then fed one letter at a time and every letter comes out in isolated form:
+ * "كاريزما" renders as disconnected letters. Two things make a single word's
+ * Range report extra rects:
  *
- * Splitting the text NODE at the run boundary changes nothing visually (bidi
- * and layout work across node boundaries) but makes every word measure as a
- * single run — one rect — so whole words reach the shaper again. Neutrals
- * (punctuation, spaces) stay attached to the preceding run; the word
- * segmenter isolates them anyway.
+ * 1. Bidi runs (all browsers): a word gluing Arabic letters to digits (Arabic-
+ *    Indic or European, no space between) always spans two bidi runs — the
+ *    letters and the number resolve to different embedding levels — so its
+ *    Range yields two rects.
+ * 2. Safari + preserved whitespace (`white-space: pre-wrap` / `pre-line` /
+ *    `pre` / `break-spaces`): WebKit lays each whitespace run out as its own
+ *    text box, and a Range starting right after one ALSO returns a collapsed
+ *    zero-width rect for the end of that previous box. So every word except
+ *    the first in a node gets two rects and shatters. (Playwright's upstream
+ *    WebKit build does not do this — only the shipping Safari engine does.)
+ *
+ * Splitting the text NODE changes nothing visually — bidi resolution and
+ * inline layout work across node boundaries — but a Range never crosses into
+ * another node's boxes, so every word measures as a single rect and whole
+ * words reach the shaper again. Whitespace becomes its own node in every
+ * case (harmless where it's collapsible; html2canvas skips whitespace-only
+ * words anyway).
+ *
+ * Run this AFTER pagination: the page-break text splitters rebuild the
+ * paragraphs they carve via `textContent`, which would undo an earlier split.
+ * It's layout-neutral, so it doesn't violate "no layout mutation between
+ * computeLayout and doc.html()".
  */
-function splitTextNodesAtBidiRuns(root: HTMLElement): void {
+function splitTextNodesAtRunBoundaries(root: HTMLElement): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const textNodes: Text[] = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -1022,21 +1038,28 @@ function splitTextNodesAtBidiRuns(root: HTMLElement): void {
     const text = node.nodeValue;
     if (!text) continue;
 
-    // UTF-16 offsets where the direction run changes. Only BMP characters
-    // classify as strong, so a cut can never land inside a surrogate pair.
-    const cuts: number[] = [];
+    // UTF-16 offsets where a new node should start. Only BMP characters
+    // classify as strong or whitespace, so a cut never lands inside a
+    // surrogate pair.
+    const cuts = new Set<number>();
     let runClass: "ltr" | "rtl" | null = null;
     for (let i = 0; i < text.length; i++) {
       const cls = classify(text[i]);
       if (cls === null) continue;
-      if (runClass !== null && cls !== runClass) cuts.push(i);
+      if (runClass !== null && cls !== runClass) cuts.add(i);
       runClass = cls;
     }
+    for (const m of text.matchAll(/\s+/g)) {
+      const from = m.index ?? 0;
+      const to = from + m[0].length;
+      if (from > 0) cuts.add(from);
+      if (to < text.length) cuts.add(to);
+    }
+    if (cuts.size === 0) continue;
 
     // splitText mutates in place; cut back-to-front so offsets stay valid.
-    for (let c = cuts.length - 1; c >= 0; c--) {
-      node.splitText(cuts[c]);
-    }
+    const sorted = Array.from(cuts).sort((a, b) => b - a);
+    for (const c of sorted) node.splitText(c);
   }
 }
 
@@ -1058,7 +1081,6 @@ async function prepare(
   try {
     normalizeTableAttributes(clone);
     fixBidiMirroredText(clone);
-    splitTextNodesAtBidiRuns(clone);
     // Pagination is computed from measured heights, so images and webfonts
     // must be loaded first — a late-loading resource shifts every element
     // below it after the break positions are already fixed.
@@ -1075,6 +1097,10 @@ async function prepare(
 
     splitOversizedText(clone, layout.pageContentPx);
     insertPageBreakSpacers(clone, layout.pageContentPx, repeatTableHeaders);
+    // Layout-neutral DOM split (words/whitespace/bidi runs into separate text
+    // nodes) so html2canvas-pro measures every word as one rect. Must follow
+    // the text splitters above, which rebuild paragraphs via textContent.
+    splitTextNodesAtRunBoundaries(clone);
 
     return {
       clone,

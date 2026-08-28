@@ -341,7 +341,7 @@
         qty: (i + 1) * 2,
         price: "$100.00",
         amount: "$" + ((i + 1) * 200).toLocaleString() + ".00",
-        desc: i % 3 === 0 ? "الطول 500cm\nRGB 5050" : "",
+        desc: i % 3 === 0 ? "الطول 500cm\nRGB 5050" : i % 3 === 1 ? "عطر كاريزما" : "",
         info: i % 2 === 0 ? "test note" : "",
       }));
 
@@ -415,6 +415,13 @@
       }
 
       const target = () => document.getElementById("print-section");
+
+      // Test hook: lets an automated runner (e.g. a WKWebView script driving
+      // the system WebKit, which Playwright can't) fetch the doc.html() PDF.
+      window.__generateHtmlPdf = async () => {
+        const out = await generatePDF(makeDoc(), target(), pdfOpts);
+        return out.output("datauristring");
+      };
 
       document
         .getElementById("generate-html")
