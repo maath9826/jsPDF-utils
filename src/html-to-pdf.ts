@@ -390,6 +390,119 @@ async function expandToFitOverflow(container: HTMLElement): Promise<void> {
 /** html2canvas' per-image load budget (its own default is 15s). */
 const DEFAULT_IMAGE_TIMEOUT_MS = 60_000;
 
+/** html2canvas options every render starts from; the caller's override them. */
+const RENDER_DEFAULTS: Partial<Html2CanvasOptions> = {
+  imageTimeout: DEFAULT_IMAGE_TIMEOUT_MS,
+};
+
+const INLINE_IMAGE_RE = /^data:image\//i;
+const INLINE_BASE64_IMAGE_RE = /^data:image\/.*;base64,/i;
+
+function isSameOriginUrl(src: string): boolean {
+  try {
+    return new URL(src, document.baseURI).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The image cache a render is handed in place of html2canvas' own.
+ *
+ * html2canvas-pro ≥ 2 caps its cache at 100 entries (LRU) and takes no option
+ * to change that — the `maxCacheSize` its cache reads is never copied from the
+ * caller's options. Parsing a document with more images than the cap evicts
+ * the FIRST ones before anything is drawn, so they simply vanish from the start
+ * of the PDF (a 153-photo invoice lost its first 53). A one-shot render must
+ * keep every image it parsed, and both html2canvas-pro 1.x and 2.x honour a
+ * caller-supplied `cache`, so the render gets this one. Its surface is exactly
+ * what the parser and renderer call — `addImage(src)` while parsing,
+ * `match(src)` while drawing — and loading mirrors html2canvas' own rules
+ * (same-origin, `useCORS`, `allowTaint`, `imageTimeout`). The `proxy` option
+ * is not mirrored: a caller using one keeps html2canvas' cache.
+ */
+class UncappedImageCache {
+  private readonly images = new Map<
+    string,
+    Promise<HTMLImageElement | undefined>
+  >();
+
+  constructor(
+    private readonly opts: Pick<
+      Partial<Html2CanvasOptions>,
+      "useCORS" | "allowTaint" | "imageTimeout"
+    >,
+  ) {}
+
+  addImage(src: string): Promise<void> {
+    if (!this.images.has(src)) {
+      const loading = this.load(src);
+      loading.catch(() => undefined); // surfaced by match(), not as unhandled
+      this.images.set(src, loading);
+    }
+    return Promise.resolve();
+  }
+
+  match(src: string): Promise<HTMLImageElement | undefined> | undefined {
+    return this.images.get(src);
+  }
+
+  has(src: string): boolean {
+    return this.images.has(src);
+  }
+
+  keys(): Promise<string[]> {
+    return Promise.resolve(Array.from(this.images.keys()));
+  }
+
+  private load(src: string): Promise<HTMLImageElement | undefined> {
+    const inline = INLINE_IMAGE_RE.test(src) || src.startsWith("blob:");
+    const sameOrigin = inline || isSameOriginUrl(src);
+    const useCORS = !inline && this.opts.useCORS === true && !sameOrigin;
+    if (!sameOrigin && !useCORS && this.opts.allowTaint !== true) {
+      return Promise.resolve(undefined);
+    }
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () =>
+        reject(new Error(`Failed to load image ${src.slice(0, 128)}`));
+      // iOS Safari taints the canvas with data URLs unless crossOrigin is set.
+      if (INLINE_BASE64_IMAGE_RE.test(src) || useCORS) {
+        img.crossOrigin = "anonymous";
+      }
+      img.src = src;
+      if (img.complete) {
+        // Inline XML images may fail to parse, throwing an Error later on.
+        setTimeout(() => resolve(img), 500);
+      }
+      const timeout = this.opts.imageTimeout ?? 15_000;
+      if (timeout > 0) {
+        setTimeout(
+          () => reject(new Error(`Timed out (${timeout}ms) loading image`)),
+          timeout,
+        );
+      }
+    });
+  }
+}
+
+/** Render defaults + the caller's options, with the uncapped cache installed. */
+function renderOptionsFor(
+  userOptions: Partial<Html2CanvasOptions> | undefined,
+): Partial<Html2CanvasOptions> {
+  const merged: Partial<Html2CanvasOptions> = {
+    ...RENDER_DEFAULTS,
+    ...userOptions,
+  };
+  if (!merged.cache && !merged.proxy) {
+    merged.cache = new UncappedImageCache(
+      merged,
+    ) as unknown as Html2CanvasOptions["cache"];
+  }
+  return merged;
+}
+
 /** JPEG quality for downscaled photos; jsPDF embeds the stream as-is. */
 const COMPRESSED_JPEG_QUALITY = 0.9;
 
@@ -1199,12 +1312,7 @@ async function generatePDF(
   // doc.html derives the html2canvas scale from width / windowWidth — the
   // same ratio the page-break spacers were measured against. A caller-
   // supplied scale would override it and desync every break position.
-  const html2canvasOptions = {
-    // html2canvas gives up on an image after 15s by default; a document with
-    // hundreds of photos can still be decoding the last ones by then.
-    imageTimeout: DEFAULT_IMAGE_TIMEOUT_MS,
-    ...opts.html2canvasOptions,
-  };
+  const html2canvasOptions = renderOptionsFor(opts.html2canvasOptions);
   delete html2canvasOptions.scale;
   html2canvasOptions.ignoreElements = ignoreOutsideRenderRoot(
     clone,
@@ -1985,7 +2093,7 @@ async function generateImagePDF(
 
   try {
     const canvas = await html2canvas(clone, {
-      imageTimeout: DEFAULT_IMAGE_TIMEOUT_MS,
+      ...RENDER_DEFAULTS,
       ...opts.html2canvasOptions,
       scale,
       backgroundColor: null,
@@ -2088,7 +2196,7 @@ async function generateImages(
 
   try {
     const canvas = await html2canvas(clone, {
-      imageTimeout: DEFAULT_IMAGE_TIMEOUT_MS,
+      ...RENDER_DEFAULTS,
       ...opts.html2canvasOptions,
       scale,
       backgroundColor: null,

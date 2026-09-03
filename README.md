@@ -142,6 +142,11 @@ Important:
   applied on top of that pruning.
 - `imageTimeout` defaults to 60s (html2canvas' own default is 15s), so a
   document with hundreds of photos isn't cut short while the last ones decode.
+- `generatePDF` hands html2canvas its own, uncapped image `cache`.
+  html2canvas-pro ≥ 2 caps its cache at 100 entries (LRU) and offers no option
+  to raise it; a document with more images than that lost its FIRST images
+  (evicted while parsing, before they were drawn). Pass your own `cache` or a
+  `proxy` to keep html2canvas' cache instead.
 
 Image handling (`generatePDF`):
 
