@@ -387,13 +387,33 @@ async function expandToFitOverflow(container: HTMLElement): Promise<void> {
   }
 }
 
+/** html2canvas' per-image load budget (its own default is 15s). */
+const DEFAULT_IMAGE_TIMEOUT_MS = 60_000;
+
+/** JPEG quality for downscaled photos; jsPDF embeds the stream as-is. */
+const COMPRESSED_JPEG_QUALITY = 0.9;
+
+/**
+ * Whether any pixel of the canvas is not fully opaque. Sampling every pixel
+ * of a 2×-display-size canvas is a few hundred KB at most.
+ */
+function canvasHasTransparency(ctx: CanvasRenderingContext2D): boolean {
+  const { width, height } = ctx.canvas;
+  const data = ctx.getImageData(0, 0, width, height).data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 255) return true;
+  }
+  return false;
+}
+
 /**
  * Downscale images in a clone so that doc.html() doesn't embed them at
  * their full intrinsic resolution (which can be 10-100× larger than the
  * displayed size). Each image is redrawn at 2× its displayed size (for
- * reasonable print quality) and converted to a PNG data URL — PNG rather
- * than JPEG so images with transparency keep their alpha channel instead
- * of being flattened onto black.
+ * reasonable print quality). Photos are re-encoded as JPEG; only an image
+ * that actually uses transparency is kept as PNG, so its alpha channel
+ * survives instead of being flattened onto black. (Re-encoding every photo
+ * as PNG made a 150-photo document three times its JPEG size.)
  */
 async function compressCloneImages(clone: HTMLElement): Promise<void> {
   const images = Array.from(clone.querySelectorAll("img"));
@@ -429,14 +449,53 @@ async function compressCloneImages(clone: HTMLElement): Promise<void> {
 
     try {
       ctx.drawImage(img, 0, 0, targetW, targetH);
+      // A JPEG source can't carry alpha; anything else is checked pixel by
+      // pixel (reading pixels also throws for a tainted canvas, like
+      // toDataURL would).
+      const isJpegSource = /^data:image\/jpe?g[;,]/i.test(img.src);
+      const keepAlpha = !isJpegSource && canvasHasTransparency(ctx);
       // Preserve layout dimensions before replacing src
       img.style.width = displayW + "px";
       img.style.height = displayH + "px";
-      img.src = canvas.toDataURL("image/png");
+      img.src = keepAlpha
+        ? canvas.toDataURL("image/png")
+        : canvas.toDataURL("image/jpeg", COMPRESSED_JPEG_QUALITY);
     } catch {
       // Cross-origin images can't be drawn to canvas; skip
     }
   }
+}
+
+/**
+ * Marks the element html2canvas is asked to render so the prune predicate
+ * below can recognise it — and the copy jsPDF's `html()` makes of it —
+ * inside html2canvas's cloned document.
+ */
+const RENDER_ROOT_ATTR = "data-jspdf-utils-render-root";
+
+/**
+ * html2canvas renders by cloning the ENTIRE document into an iframe, not just
+ * the element it was given: every sibling of that element — the host app's
+ * whole UI, the caller's own offscreen copy of the document, … — is cloned,
+ * styled and laid out as well, and the iframe load the render waits on
+ * includes every <img> in all of it. On a busy page that costs more than the
+ * PDF itself. Only <head> (stylesheets) and the render root's ancestor chain
+ * (inherited styles) matter for rendering it, so ignore everything else.
+ * Composes with a caller-supplied `ignoreElements`.
+ */
+function ignoreOutsideRenderRoot(
+  root: HTMLElement,
+  userIgnore?: (el: Element) => boolean,
+): (el: Element) => boolean {
+  root.setAttribute(RENDER_ROOT_ATTR, "");
+  const selector = `[${RENDER_ROOT_ATTR}]`;
+  return (el) => {
+    if (userIgnore?.(el)) return true;
+    if (el.closest("head")) return false;
+    // Inside the render root, or an ancestor of it (body, jsPDF's container…).
+    if (el.closest(selector) || el.querySelector(selector)) return false;
+    return true;
+  };
 }
 
 /**
@@ -1140,8 +1199,17 @@ async function generatePDF(
   // doc.html derives the html2canvas scale from width / windowWidth — the
   // same ratio the page-break spacers were measured against. A caller-
   // supplied scale would override it and desync every break position.
-  const html2canvasOptions = { ...opts.html2canvasOptions };
+  const html2canvasOptions = {
+    // html2canvas gives up on an image after 15s by default; a document with
+    // hundreds of photos can still be decoding the last ones by then.
+    imageTimeout: DEFAULT_IMAGE_TIMEOUT_MS,
+    ...opts.html2canvasOptions,
+  };
   delete html2canvasOptions.scale;
+  html2canvasOptions.ignoreElements = ignoreOutsideRenderRoot(
+    clone,
+    opts.html2canvasOptions?.ignoreElements,
+  );
 
   try {
     await new Promise<void>((resolve) => {
@@ -1381,6 +1449,7 @@ async function renderSlotToCanvas(
     return await html2canvas(wrapper, {
       scale,
       backgroundColor: null,
+      ignoreElements: ignoreOutsideRenderRoot(wrapper),
     });
   } finally {
     wrapper.remove();
@@ -1550,6 +1619,7 @@ async function renderTextEdgeStrip(
       backgroundColor: null,
       width: Math.ceil(widthPx),
       height: Math.ceil(heightPx),
+      ignoreElements: ignoreOutsideRenderRoot(wrapper),
     });
   } finally {
     wrapper.remove();
@@ -1915,9 +1985,14 @@ async function generateImagePDF(
 
   try {
     const canvas = await html2canvas(clone, {
+      imageTimeout: DEFAULT_IMAGE_TIMEOUT_MS,
       ...opts.html2canvasOptions,
       scale,
       backgroundColor: null,
+      ignoreElements: ignoreOutsideRenderRoot(
+        clone,
+        opts.html2canvasOptions?.ignoreElements,
+      ),
     });
 
     // Deliberately dynamic (the top-level import is type-only): this is the
@@ -2013,9 +2088,14 @@ async function generateImages(
 
   try {
     const canvas = await html2canvas(clone, {
+      imageTimeout: DEFAULT_IMAGE_TIMEOUT_MS,
       ...opts.html2canvasOptions,
       scale,
       backgroundColor: null,
+      ignoreElements: ignoreOutsideRenderRoot(
+        clone,
+        opts.html2canvasOptions?.ignoreElements,
+      ),
     });
 
     const dims = computePageDimensions(canvas, merged, layout, scale);

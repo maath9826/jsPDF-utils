@@ -130,6 +130,29 @@ Important:
   continues onto — at most once per page.
 - Set to `false` to render the header only once, where the table starts.
 
+`html2canvasOptions` behavior:
+
+- Forwarded to html2canvas by `generatePDF`, `generateImagePDF`, and
+  `generateImages` (`scale` is always derived from the page layout and cannot
+  be overridden).
+- html2canvas clones the whole document into its render iframe. Since 0.5.3
+  the library prunes that clone to `<head>` plus the render element and its
+  ancestors, so the rest of the page (a large app UI, other offscreen copies)
+  is neither cloned nor waited on. A caller-supplied `ignoreElements` is
+  applied on top of that pruning.
+- `imageTimeout` defaults to 60s (html2canvas' own default is 15s), so a
+  document with hundreds of photos isn't cut short while the last ones decode.
+
+Image handling (`generatePDF`):
+
+- Every `<img>` larger than 2× its laid-out size is redrawn at 2× and
+  re-encoded before rendering, so the PDF never embeds full-resolution
+  originals. Since 0.5.3 the re-encode is JPEG (quality 0.9); an image whose
+  pixels actually use transparency is kept as PNG so its alpha survives.
+- Images already at or below 2× and supplied as data-URLs are embedded as-is.
+  Supplying print-sized JPEG data-URLs up front therefore skips the canvas
+  pass entirely.
+
 ## Margin Content and Borders
 
 `marginContent`, `border`, and `textBorder` are independent, top-level page
